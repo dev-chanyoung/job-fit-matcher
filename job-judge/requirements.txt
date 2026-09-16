@@ -1,0 +1,9 @@
+anthropic
+trafilatura
+lxml_html_clean
+httpx
+typer
+notion-client
+python-dotenv
+pydantic
+pytest
