@@ -79,7 +79,13 @@ def format_result_analysis(
     version: str = "v1",
     uncertain_company_size: str | None = None,
 ) -> str:
-    """Produce the 결과분석 text block described in blueprint section 8."""
+    """Produce the 결과분석 text block.
+
+    Leads with qualitative fit/mismatch reasoning (which parts match, which
+    don't) built from the evidence/gaps fields, since that's what a human
+    scans first when deciding whether to apply. The numeric score breakdown
+    is kept as a secondary reference line, not the headline.
+    """
     date_str = datetime.now().date().isoformat()
     scores = evaluation.scores
     score_parts = " ".join(
@@ -87,20 +93,34 @@ def format_result_analysis(
     )
     total = sum(scores.get(key, 0) for key, _ in SCORE_LABELS)
 
-    evidence_summary = " / ".join(
-        f"{e.jd_requirement} {e.match_level} 매치" for e in evaluation.evidence
-    )
-    gaps_summary = ", ".join(evaluation.gaps)
-    topics_summary = ", ".join(evaluation.cover_letter_topics)
+    fit_evidence = [e for e in evaluation.evidence if e.match_level in ("강함", "일부")]
+    weak_evidence = [e for e in evaluation.evidence if e.match_level in ("미확인", "없음")]
 
     lines = [
         f"[{version} 평가결과 / {date_str}]",
         f"판정: {evaluation.verdict}",
-        f"점수: {score_parts} (총{total})",
-        f"근거: {evidence_summary}",
-        f"부족한 점: {gaps_summary}",
-        f"자소서 소재: {topics_summary}",
+        "",
+        "적합한 부분:",
     ]
+    if fit_evidence:
+        lines += [
+            f"- {e.jd_requirement} → {e.profile_basis} ({e.match_level})"
+            for e in fit_evidence
+        ]
+    else:
+        lines.append("- (뚜렷한 강점 근거 없음)")
+
+    lines += ["", "부족하거나 안 맞는 부분:"]
+    weak_lines = [
+        f"- {e.jd_requirement} → {e.profile_basis} ({e.match_level})"
+        for e in weak_evidence
+    ] + [f"- {gap}" for gap in evaluation.gaps]
+    lines += weak_lines if weak_lines else ["- (특별히 없음)"]
+
+    if evaluation.cover_letter_topics:
+        lines += ["", f"자소서 소재: {', '.join(evaluation.cover_letter_topics)}"]
+
+    lines += ["", f"(참고) 배점: {score_parts} (총{total})"]
     if uncertain_company_size:
         lines.append(f"추정 기업규모: {uncertain_company_size}")
 

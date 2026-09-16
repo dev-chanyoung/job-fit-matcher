@@ -93,6 +93,37 @@ class TestFormatResultAnalysis:
         assert "우대사항" in text
         assert "도메인" in text
 
+    def test_leads_with_qualitative_fit_and_gap_sections(self):
+        """Score is a secondary reference line; fit/mismatch reasoning is the
+        headline the user scans first."""
+        evaluation = _valid_evaluation()
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "적합한 부분:" in text
+        assert "부족하거나 안 맞는 부분:" in text
+        assert "(참고) 배점:" in text
+        # The strong-match evidence item lands in the fit section.
+        assert "Spring Boot 백엔드 개발 경험 → Spring Boot 3년 경력 (강함)" in text
+        # The headline sections appear before the reference score line.
+        assert text.index("적합한 부분:") < text.index("(참고) 배점:")
+
+    def test_weak_and_unconfirmed_evidence_lands_in_gap_section(self):
+        evaluation = _valid_evaluation(
+            evidence=[
+                {
+                    "jd_requirement": "Kafka 운영 경험",
+                    "profile_basis": "학습만 해봄, 실무 경험 없음",
+                    "match_level": "미확인",
+                }
+            ],
+            gaps=["메시지 브로커 운영 경험 없음"],
+        )
+        text = format_result_analysis(evaluation, version="v1")
+
+        gap_section = text.split("부족하거나 안 맞는 부분:")[1]
+        assert "Kafka 운영 경험 → 학습만 해봄, 실무 경험 없음 (미확인)" in gap_section
+        assert "메시지 브로커 운영 경험 없음" in gap_section
+
 
 def _mock_client_with_data_source(query_results):
     """Build a MagicMock Notion client wired for the current (2025-09+) API,
