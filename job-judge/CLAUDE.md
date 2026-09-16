@@ -93,6 +93,14 @@
   `python judge_manual.py <file>` 같은 실행으로 콘솔 출력까지 확인한다 (CliRunner 캡처와 실제
   콘솔 인코딩 동작이 다를 수 있음 — 실제로 이 프로젝트에서 그렇게 버그를 하나 놓쳤었다).
 
+## Git 정책
+
+이 프로젝트는 사용자가 **자동 commit+push를 명시적으로 승인**했다 (2026-09-16). 코드/설정/
+profile.md가 바뀌면, 매번 확인받지 않고 의미 있는 단위로 커밋 후 `git push`까지 수행한다
+(데스크탑/노트북 간 동기화가 이 저장소의 존재 목적이므로). 원격 저장소:
+`https://github.com/dev-chanyoung/job-fit-matcher` (private). `.env`는 계속 gitignore 대상 —
+자동 push라도 `.env`를 커밋 대상에 포함하지 않는다.
+
 ## 테스트
 
 ```
