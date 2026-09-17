@@ -2,11 +2,18 @@
 
 Write-permission rules (blueprint section 8 table) are enforced here:
 - 자동 채움 (auto-fill): 회사명/직무명/공고링크/마감일/기술스택/연차요건 are always
-  written from JobPosting.
-- 제안 (suggested): 결과분석 (+ 기업규모/도메인 only when confidently inferable)
-  are written for human review.
-- 자동화 금지 (never touched by code): 지원상태/우선순위/지원동기메모 must never
-  appear as keys in any properties payload sent to Notion, for create or update.
+  written from JobPosting. 기업규모/도메인 are also auto-filled, but only when
+  JobPosting.company_size/domain exactly matches one of Notion's fixed select
+  options -- otherwise the column is left blank and the guess is mentioned as
+  "추정: OO" text in 결과분석 instead (see format_result_analysis).
+- 제안 (suggested): 결과분석 is written for human review.
+- 지원상태 (scoped exception): defaults to "관심있음" ONLY when creating a brand
+  new page, so new postings sort correctly by default. An existing row's
+  지원상태 is never touched by an update.
+- 자동화 금지 (never touched by code): 우선순위/지원동기메모 must never appear as
+  keys in any properties payload sent to Notion, for create or update -- and
+  지원상태 must never appear in the payload used for an *update* of an
+  existing row, only in the one-time create payload.
 """
 
 import os
@@ -39,6 +46,12 @@ FIXED_TECH_STACK_OPTIONS = [
     "MFC",
 ]
 
+# 기업규모/도메인 fixed select options, exactly as configured in the Notion
+# database. Same rule as 기술스택: only an exact (case-sensitive) match may be
+# written to the column -- automation must never introduce a new option.
+FIXED_COMPANY_SIZE_OPTIONS = ["스타트업", "중견기업", "대기업"]
+FIXED_DOMAIN_OPTIONS = ["커머스", "핀테크", "금융", "제조/자동차", "IT서비스", "통신"]
+
 SCORE_LABELS = [
     ("필수요건_충족", "필수요건"),
     ("기술스택_일치", "기술스택"),
@@ -61,6 +74,20 @@ def match_tech_stack(tech_stack: list[str]) -> list[str]:
     return [tech for tech in tech_stack if tech in fixed_set]
 
 
+def match_company_size(company_size: str | None) -> str | None:
+    """Return company_size if it exactly matches a fixed 기업규모 option, else None."""
+    if company_size in FIXED_COMPANY_SIZE_OPTIONS:
+        return company_size
+    return None
+
+
+def match_domain(domain: str | None) -> str | None:
+    """Return domain if it exactly matches a fixed 도메인 option, else None."""
+    if domain in FIXED_DOMAIN_OPTIONS:
+        return domain
+    return None
+
+
 def classify_years_requirement(job: JobPosting) -> str:
     """Force-classify required_years into "신입~3년" or "경력무관".
 
@@ -78,6 +105,7 @@ def format_result_analysis(
     evaluation: Evaluation,
     version: str = "v1",
     uncertain_company_size: str | None = None,
+    uncertain_domain: str | None = None,
 ) -> str:
     """Produce the 결과분석 text block.
 
@@ -85,6 +113,10 @@ def format_result_analysis(
     don't) built from the evidence/gaps fields, since that's what a human
     scans first when deciding whether to apply. The numeric score breakdown
     is kept as a secondary reference line, not the headline.
+
+    uncertain_company_size/uncertain_domain are only for the case where the
+    guess doesn't match a fixed Notion select option -- they get mentioned
+    here as text instead of being written to the 기업규모/도메인 columns.
     """
     date_str = datetime.now().date().isoformat()
     scores = evaluation.scores
@@ -122,7 +154,9 @@ def format_result_analysis(
 
     lines += ["", f"(참고) 배점: {score_parts} (총{total})"]
     if uncertain_company_size:
-        lines.append(f"추정 기업규모: {uncertain_company_size}")
+        lines.append(f"추정 기업규모: {uncertain_company_size} (고정 옵션에 없어 컬럼 미기입)")
+    if uncertain_domain:
+        lines.append(f"추정 도메인: {uncertain_domain} (고정 옵션에 없어 컬럼 미기입)")
 
     return "\n".join(lines)
 
@@ -162,8 +196,10 @@ def _build_properties(
     is permitted to write: 자동 채움 fields + 기술스택 + 연차요건 + 결과분석
     (+ 평가기준버전 when a version is given).
 
-    자동화 금지 fields (지원상태/우선순위/지원동기메모) are never constructed
-    here -- they simply have no code path that adds them to this dict.
+    자동화 금지 fields (우선순위/지원동기메모) are never constructed here -- they
+    simply have no code path that adds them to this dict. 지원상태 is also
+    never added here -- the create-only default is layered on separately in
+    save(), never as part of this shared create/update payload.
     """
     properties: dict = {
         "회사명": _title(job.company),
@@ -177,6 +213,15 @@ def _build_properties(
         properties["공고링크"] = _url(job.source_url)
     if version is not None:
         properties["평가기준버전"] = _rich_text(version)
+
+    matched_size = match_company_size(job.company_size)
+    if matched_size:
+        properties["기업규모"] = _select(matched_size)
+
+    matched_domain = match_domain(job.domain)
+    if matched_domain:
+        properties["도메인"] = _select(matched_domain)
+
     return properties
 
 
@@ -208,8 +253,10 @@ def save(
 
     Looks up an existing row by 공고링크 == job.source_url. If found, updates
     it; otherwise creates a new page. In both cases the properties payload
-    contains only 자동 채움 + 기술스택 + 연차요건 + 결과분석 (+ 평가기준버전)
-    fields -- 지원상태/우선순위/지원동기메모 are never included.
+    contains only 자동 채움 + 기술스택 + 연차요건 + 기업규모/도메인(고정 옵션
+    매칭 시) + 결과분석 (+ 평가기준버전) fields -- 우선순위/지원동기메모 are
+    never included, and 지원상태 is added ONLY for a brand-new page (never on
+    an update to an existing row).
 
     If evaluation is None (hard-filtered case), 결과분석 is instead built from
     filtered_reason as "필터 탈락: {reasons}".
@@ -227,8 +274,18 @@ def save(
 
     data_source_id = _resolve_data_source_id(client, db_id)
 
+    uncertain_company_size = (
+        job.company_size if job.company_size and not match_company_size(job.company_size) else None
+    )
+    uncertain_domain = job.domain if job.domain and not match_domain(job.domain) else None
+
     if evaluation is not None:
-        result_analysis_text = format_result_analysis(evaluation, version=version)
+        result_analysis_text = format_result_analysis(
+            evaluation,
+            version=version,
+            uncertain_company_size=uncertain_company_size,
+            uncertain_domain=uncertain_domain,
+        )
     else:
         reasons = ", ".join(filtered_reason or [])
         result_analysis_text = f"필터 탈락: {reasons}"
@@ -251,7 +308,12 @@ def save(
     if existing_page_id:
         client.pages.update(page_id=existing_page_id, properties=properties)
     else:
+        # 지원상태 default is layered on ONLY here, for a brand-new row, so it
+        # sorts correctly from the start -- an update to an existing row above
+        # never sees this key and therefore never overwrites a value a human
+        # (or a prior run) already set.
+        create_properties = {**properties, "지원상태": _select("관심있음")}
         client.pages.create(
             parent={"type": "data_source_id", "data_source_id": data_source_id},
-            properties=properties,
+            properties=create_properties,
         )

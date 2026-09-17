@@ -14,6 +14,8 @@ class JobPosting(BaseModel):
     required_years: Optional[str] = None
     education_requirement: Optional[str] = None
     location: Optional[str] = None
+    company_size: Optional[str] = None  # 스타트업/중견기업/대기업 (Notion 고정 옵션과 매칭 시에만 컬럼에 반영)
+    domain: Optional[str] = None  # 커머스/핀테크/금융/제조/자동차/IT서비스/통신 (Notion 고정 옵션과 매칭 시에만 컬럼에 반영)
     must_have: list[str] = Field(default_factory=list)
     nice_to_have: list[str] = Field(default_factory=list)
     tech_stack: list[str] = Field(default_factory=list)
