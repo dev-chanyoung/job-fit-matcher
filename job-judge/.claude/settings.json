@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python essay_keywords.py check --json-hook",
+            "timeout": 15,
+            "statusMessage": "자기소개서 문항 키워드 제안 대기 항목 확인 중..."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -11,12 +11,17 @@ from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from notion_writer import (  # noqa: E402
+    ESSAY_QUESTIONS_PROPERTY,
+    apply_keyword_suggestions,
     classify_years_requirement,
+    fetch_essay_question_rows,
+    find_pending_questions,
     format_result_analysis,
     match_company_size,
     match_domain,
     match_tech_stack,
     save,
+    update_essay_questions,
 )
 from schemas import Evaluation, JobPosting  # noqa: E402
 
@@ -288,3 +293,111 @@ class TestResolveDataSourceId:
 
         with pytest.raises(RuntimeError):
             _resolve_data_source_id(mock_client, "some-db-id")
+
+
+class TestFindPendingQuestions:
+    def test_question_without_suggestion_is_pending(self):
+        text = "1. 협업 경험을 서술하시오."
+        assert find_pending_questions(text) == ["1. 협업 경험을 서술하시오."]
+
+    def test_question_with_suggestion_is_not_pending(self):
+        text = "1. 협업 경험을 서술하시오.\n→ 키워드 후보: Clean Eye(협업)"
+        assert find_pending_questions(text) == []
+
+    def test_mixed_blocks_only_pending_ones_returned(self):
+        text = (
+            "1. 협업 경험을 서술하시오.\n→ 키워드 후보: Clean Eye(협업)"
+            "\n\n"
+            "2. 실패를 극복한 경험은?"
+        )
+        assert find_pending_questions(text) == ["2. 실패를 극복한 경험은?"]
+
+    def test_blank_text_has_no_pending_questions(self):
+        assert find_pending_questions("") == []
+
+
+class TestApplyKeywordSuggestions:
+    def test_appends_suggestion_after_matching_pending_question(self):
+        text = "1. 협업 경험을 서술하시오."
+        result = apply_keyword_suggestions(
+            text, {"1. 협업 경험을 서술하시오.": "Clean Eye(협업/팀프로젝트)"}
+        )
+        assert result == "1. 협업 경험을 서술하시오.\n→ 키워드 후보: Clean Eye(협업/팀프로젝트)"
+
+    def test_does_not_touch_block_that_already_has_a_suggestion(self):
+        text = "1. 협업 경험을 서술하시오.\n→ 키워드 후보: 기존 제안"
+        result = apply_keyword_suggestions(text, {"1. 협업 경험을 서술하시오.": "새 제안"})
+        assert result == text
+
+    def test_only_updates_questions_present_in_suggestions_dict(self):
+        text = "1. 질문 A\n\n2. 질문 B"
+        result = apply_keyword_suggestions(text, {"1. 질문 A": "A 제안"})
+        assert "1. 질문 A\n→ 키워드 후보: A 제안" in result
+        assert "2. 질문 B" in result
+        assert "2. 질문 B\n→" not in result
+
+
+def _mock_client_for_essay_rows(pages):
+    mock_client = MagicMock()
+    mock_client.databases.retrieve.return_value = {
+        "data_sources": [{"id": "fake-data-source-id"}]
+    }
+    mock_client.data_sources.query.return_value = {"results": pages, "has_more": False}
+    return mock_client
+
+
+def _essay_page(page_id, company, position, essay_text):
+    return {
+        "id": page_id,
+        "properties": {
+            "회사명": {"title": [{"plain_text": company}]},
+            "직무명": {"rich_text": [{"plain_text": position}]},
+            ESSAY_QUESTIONS_PROPERTY: {"rich_text": [{"plain_text": essay_text}]},
+        },
+    }
+
+
+class TestFetchEssayQuestionRows:
+    def test_skips_pages_with_empty_essay_text(self):
+        pages = [_essay_page("p1", "회사A", "백엔드", "")]
+        mock_client = _mock_client_for_essay_rows(pages)
+
+        rows = fetch_essay_question_rows(client=mock_client, db_id="fake-db-id")
+
+        assert rows == []
+
+    def test_returns_row_with_pending_questions_computed(self):
+        pages = [_essay_page("p1", "회사A", "백엔드", "1. 협업 경험을 서술하시오.")]
+        mock_client = _mock_client_for_essay_rows(pages)
+
+        rows = fetch_essay_question_rows(client=mock_client, db_id="fake-db-id")
+
+        assert len(rows) == 1
+        assert rows[0]["page_id"] == "p1"
+        assert rows[0]["company"] == "회사A"
+        assert rows[0]["position"] == "백엔드"
+        assert rows[0]["pending_questions"] == ["1. 협업 경험을 서술하시오."]
+
+    def test_row_with_no_pending_questions_has_empty_list(self):
+        essay_text = "1. 협업 경험을 서술하시오.\n→ 키워드 후보: Clean Eye"
+        pages = [_essay_page("p1", "회사A", "백엔드", essay_text)]
+        mock_client = _mock_client_for_essay_rows(pages)
+
+        rows = fetch_essay_question_rows(client=mock_client, db_id="fake-db-id")
+
+        assert rows[0]["pending_questions"] == []
+
+
+class TestUpdateEssayQuestions:
+    def test_updates_only_the_essay_questions_property(self):
+        mock_client = MagicMock()
+
+        update_essay_questions("some-page-id", "새 텍스트", client=mock_client)
+
+        mock_client.pages.update.assert_called_once()
+        _, kwargs = mock_client.pages.update.call_args
+        assert kwargs["page_id"] == "some-page-id"
+        assert list(kwargs["properties"].keys()) == [ESSAY_QUESTIONS_PROPERTY]
+        assert kwargs["properties"][ESSAY_QUESTIONS_PROPERTY] == {
+            "rich_text": [{"text": {"content": "새 텍스트"}}]
+        }

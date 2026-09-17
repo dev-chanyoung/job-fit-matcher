@@ -64,6 +64,139 @@ SCORE_LABELS = [
     ("도메인_연관성", "도메인"),
 ]
 
+# 자기소개서 문항: 사용자가 지원할 회사/직무 행에 직접 원문을 붙여넣는 rich_text 컬럼
+# (2026-09-17 사용자 요청). 코드는 이 컬럼 전용으로 update_essay_questions()만 호출하며,
+# 다른 어떤 저장 경로에서도 이 프로퍼티 키를 건드리지 않는다 -- save()의 공유 properties
+# 딕셔너리에는 절대 포함되지 않는다.
+ESSAY_QUESTIONS_PROPERTY = "자기소개서 문항"
+KEYWORD_SUGGESTION_MARKER = "→ 키워드 후보:"
+
+
+def split_question_blocks(text: str) -> list[str]:
+    """Split 자기소개서 문항 text into per-question blocks on blank lines.
+
+    A block is everything the user typed for one question, optionally
+    followed by a previously-appended keyword-suggestion line. Blank lines
+    (one or more) are the separator; leading/trailing whitespace per block is
+    stripped and empty blocks are dropped.
+    """
+    raw_blocks = text.split("\n\n")
+    return [b.strip() for b in raw_blocks if b.strip()]
+
+
+def is_block_pending(block: str) -> bool:
+    """A block is pending when it has no keyword-suggestion line yet."""
+    return KEYWORD_SUGGESTION_MARKER not in block
+
+
+def question_text(block: str) -> str:
+    """The question itself is always the block's first line."""
+    return block.splitlines()[0].strip()
+
+
+def find_pending_questions(text: str) -> list[str]:
+    """Return the question text of every block that has no suggestion yet."""
+    return [question_text(b) for b in split_question_blocks(text) if is_block_pending(b)]
+
+
+def apply_keyword_suggestions(text: str, suggestions: dict[str, str]) -> str:
+    """Append a "→ 키워드 후보:" line to each pending block whose question text
+    is a key in suggestions. Blocks that already have a suggestion, or whose
+    question isn't in suggestions, are returned unchanged. The original
+    question text is never modified -- this only ever appends a line.
+    """
+    blocks = split_question_blocks(text)
+    new_blocks = []
+    for block in blocks:
+        q = question_text(block)
+        if is_block_pending(block) and q in suggestions:
+            new_blocks.append(f"{block}\n{KEYWORD_SUGGESTION_MARKER} {suggestions[q]}")
+        else:
+            new_blocks.append(block)
+    return "\n\n".join(new_blocks)
+
+
+def _plain_text(prop: dict) -> str:
+    """Extract the concatenated plain text out of a Notion rich_text property
+    value (the dict shape returned by the API, not the write-shape helpers
+    below)."""
+    runs = prop.get("rich_text", []) if prop else []
+    return "".join(run.get("plain_text", run.get("text", {}).get("content", "")) for run in runs)
+
+
+def fetch_essay_question_rows(client=None, db_id: str | None = None) -> list[dict]:
+    """Return every row that has non-empty 자기소개서 문항 text, with its
+    pending questions already computed.
+
+    Each item: {"page_id", "company", "position", "text", "pending_questions"}.
+    Paginates through client.data_sources.query -- a personal job tracker DB
+    is small enough that this is never more than a handful of pages.
+    """
+    if client is None:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        from notion_client import Client
+
+        client = Client(auth=os.environ.get("NOTION_API_KEY"))
+
+    if db_id is None:
+        db_id = os.environ.get("NOTION_DB_ID")
+
+    data_source_id = _resolve_data_source_id(client, db_id)
+
+    rows: list[dict] = []
+    start_cursor = None
+    while True:
+        kwargs = {"data_source_id": data_source_id, "page_size": 100}
+        if start_cursor:
+            kwargs["start_cursor"] = start_cursor
+        result = client.data_sources.query(**kwargs)
+
+        for page in result.get("results", []):
+            props = page.get("properties", {})
+            text = _plain_text(props.get(ESSAY_QUESTIONS_PROPERTY, {}))
+            if not text.strip():
+                continue
+            company_prop = props.get("회사명", {})
+            company = "".join(
+                run.get("plain_text", "") for run in company_prop.get("title", [])
+            )
+            position = _plain_text(props.get("직무명", {}))
+            rows.append(
+                {
+                    "page_id": page["id"],
+                    "company": company,
+                    "position": position,
+                    "text": text,
+                    "pending_questions": find_pending_questions(text),
+                }
+            )
+
+        if not result.get("has_more"):
+            break
+        start_cursor = result.get("next_cursor")
+
+    return rows
+
+
+def update_essay_questions(page_id: str, text: str, client=None) -> None:
+    """Write the updated 자기소개서 문항 text back to a single page.
+
+    This is the ONLY property this function ever touches -- it never sees or
+    sends 우선순위/지원동기메모/지원상태, so it can't violate the write-permission
+    rules those fields require regardless of how it's called.
+    """
+    if client is None:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        from notion_client import Client
+
+        client = Client(auth=os.environ.get("NOTION_API_KEY"))
+
+    client.pages.update(page_id=page_id, properties={ESSAY_QUESTIONS_PROPERTY: _rich_text(text)})
+
 
 def match_tech_stack(tech_stack: list[str]) -> list[str]:
     """Return only the items in tech_stack that exactly match a fixed option.
