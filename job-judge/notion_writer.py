@@ -8,8 +8,11 @@ Write-permission rules (blueprint section 8 table) are enforced here:
   "추정: OO" text in 결과분석 instead (see format_result_analysis).
 - 제안 (suggested): 결과분석 is written for human review.
 - 지원상태 (scoped exception): defaults to "관심있음" ONLY when creating a brand
-  new page, so new postings sort correctly by default. An existing row's
-  지원상태 is never touched by an update.
+  new page, so new postings sort correctly by default -- EXCEPT when the
+  posting's deadline has already passed as of today, in which case the
+  create-time default is "지원안함" instead (2026-09-17 사용자 요청). An
+  existing row's 지원상태 is never touched by an update, regardless of
+  deadline.
 - 자동화 금지 (never touched by code): 우선순위/지원동기메모 must never appear as
   keys in any properties payload sent to Notion, for create or update -- and
   지원상태 must never appear in the payload used for an *update* of an
@@ -19,6 +22,7 @@ Write-permission rules (blueprint section 8 table) are enforced here:
 import os
 from datetime import datetime
 
+from hard_filter import is_past
 from schemas import Evaluation, JobPosting
 
 DB_NAME = "백엔드_공고_트래커"
@@ -311,8 +315,10 @@ def save(
         # 지원상태 default is layered on ONLY here, for a brand-new row, so it
         # sorts correctly from the start -- an update to an existing row above
         # never sees this key and therefore never overwrites a value a human
-        # (or a prior run) already set.
-        create_properties = {**properties, "지원상태": _select("관심있음")}
+        # (or a prior run) already set. If the deadline has already passed as
+        # of today, default to 지원안함 instead of 관심있음 (2026-09-17 요청).
+        default_status = "지원안함" if job.deadline and is_past(job.deadline) else "관심있음"
+        create_properties = {**properties, "지원상태": _select(default_status)}
         client.pages.create(
             parent={"type": "data_source_id", "data_source_id": data_source_id},
             properties=create_properties,

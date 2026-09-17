@@ -221,6 +221,17 @@ class TestSaveNewRow:
         _, kwargs = mock_client.pages.create.call_args
         assert kwargs["properties"]["지원상태"] == {"select": {"name": "관심있음"}}
 
+    def test_new_page_defaults_status_to_not_applying_when_deadline_already_passed(self):
+        """When the deadline has already passed as of today, a brand-new row
+        should default to 지원안함 instead of 관심있음 (2026-09-17 사용자 요청)."""
+        mock_client = _mock_client_with_data_source([])
+
+        job = _valid_job(deadline="2020-01-01")
+        save(job, _valid_evaluation(), client=mock_client, db_id="fake-db-id")
+
+        _, kwargs = mock_client.pages.create.call_args
+        assert kwargs["properties"]["지원상태"] == {"select": {"name": "지원안함"}}
+
 
 class TestSaveExistingRow:
     def test_updates_existing_page_without_protected_fields(self):
