@@ -31,10 +31,22 @@ def _valid_evidence_kwargs(**overrides):
     return kwargs
 
 
+def _valid_scores(**overrides):
+    scores = {
+        "필수요건_충족": 20,
+        "기술스택_일치": 15,
+        "업무내용_일치": 10,
+        "우대사항": 5,
+        "도메인_연관성": 5,
+    }
+    scores.update(overrides)
+    return scores
+
+
 def _valid_evaluation_kwargs(**overrides):
     kwargs = {
         "verdict": "지원 고려",
-        "scores": {"필수요건_충족": 20},
+        "scores": _valid_scores(),
         "evidence": [Evidence(**_valid_evidence_kwargs())],
         "gaps": [],
         "cover_letter_topics": [],
@@ -102,3 +114,38 @@ class TestEvaluation:
         kwargs = _valid_evaluation_kwargs(evidence_quality="완벽함")
         with pytest.raises(ValidationError):
             Evaluation(**kwargs)
+
+
+class TestEvaluationScoresValidation:
+    def test_missing_key_raises(self):
+        scores = _valid_scores()
+        del scores["도메인_연관성"]
+        with pytest.raises(ValidationError):
+            Evaluation(**_valid_evaluation_kwargs(scores=scores))
+
+    def test_unknown_key_raises(self):
+        scores = _valid_scores()
+        del scores["필수요건_충족"]
+        scores["필수요건충족"] = 20  # typo'd key, not one of SCORE_CAPS
+        with pytest.raises(ValidationError):
+            Evaluation(**_valid_evaluation_kwargs(scores=scores))
+
+    def test_negative_value_raises(self):
+        scores = _valid_scores(필수요건_충족=-10)
+        with pytest.raises(ValidationError):
+            Evaluation(**_valid_evaluation_kwargs(scores=scores))
+
+    def test_value_above_cap_raises(self):
+        scores = _valid_scores(필수요건_충족=100)
+        with pytest.raises(ValidationError):
+            Evaluation(**_valid_evaluation_kwargs(scores=scores))
+
+    def test_empty_scores_dict_raises(self):
+        with pytest.raises(ValidationError):
+            Evaluation(**_valid_evaluation_kwargs(scores={}))
+
+    def test_value_at_cap_boundary_passes(self):
+        scores = _valid_scores(필수요건_충족=30, 기술스택_일치=0)
+        evaluation = Evaluation(**_valid_evaluation_kwargs(scores=scores))
+        assert evaluation.scores["필수요건_충족"] == 30
+        assert evaluation.scores["기술스택_일치"] == 0

@@ -136,6 +136,26 @@ class TestFormatResultAnalysis:
         # The headline sections appear before the reference score line.
         assert text.index("적합한 부분:") < text.index("(참고) 배점:")
 
+    def test_exposes_evidence_quality_under_verdict(self):
+        evaluation = _valid_evaluation(evidence_quality="일부 부족")
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "정보 충분도: 일부 부족" in text
+        assert text.index("판정:") < text.index("정보 충분도:") < text.index("적합한 부분:")
+
+    def test_exposes_risks_when_present(self):
+        evaluation = _valid_evaluation(risks=["자격증 취득 여부 미확인"])
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "위험 요인:" in text
+        assert "- 자격증 취득 여부 미확인" in text
+
+    def test_omits_risks_section_when_empty(self):
+        evaluation = _valid_evaluation(risks=[])
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "위험 요인:" not in text
+
     def test_weak_and_unconfirmed_evidence_lands_in_gap_section(self):
         evaluation = _valid_evaluation(
             evidence=[
@@ -289,10 +309,13 @@ class TestSaveExistingRow:
 
 
 class TestSaveHardFiltered:
-    def test_hard_filtered_posting_has_no_score(self):
+    def test_hard_filtered_posting_score_is_explicit_null(self):
         """No Evaluation exists for a hard-filtered posting, so 점수 must be
-        omitted rather than written as 0 (0 would misleadingly read as 'scored
-        and got zero' instead of 'never evaluated')."""
+        sent as an EXPLICIT null rather than written as 0 (0 would
+        misleadingly read as 'scored and got zero' instead of 'never
+        evaluated') and rather than omitted (omitting it on an update would
+        leave a stale score from a prior evaluation untouched -- see the
+        update test below)."""
         mock_client = _mock_client_with_data_source([])
 
         save(
@@ -304,7 +327,28 @@ class TestSaveHardFiltered:
         )
 
         _, kwargs = mock_client.pages.create.call_args
-        assert "점수" not in kwargs["properties"]
+        assert kwargs["properties"]["점수"] == {"number": None}
+
+    def test_hard_filtered_update_clears_stale_score_from_prior_evaluation(self):
+        """A posting that was previously evaluated (and scored) later gets
+        re-run and hard-filtered -- e.g. its deadline passed -- so the
+        update must explicitly null out 점수 instead of leaving the old
+        score in place (real bug: omitting the key on update sends no
+        instruction to Notion, so a prior score silently lingers)."""
+        mock_client = _mock_client_with_data_source([{"id": "existing-page-id"}])
+
+        save(
+            _valid_job(),
+            evaluation=None,
+            filtered_reason=["마감 지남"],
+            client=mock_client,
+            db_id="fake-db-id",
+        )
+
+        mock_client.pages.update.assert_called_once()
+        mock_client.pages.create.assert_not_called()
+        _, kwargs = mock_client.pages.update.call_args
+        assert kwargs["properties"]["점수"] == {"number": None}
 
     def test_new_row_with_filtered_reason_and_no_evaluation(self):
         mock_client = _mock_client_with_data_source([])

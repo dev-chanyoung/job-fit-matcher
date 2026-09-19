@@ -3,8 +3,10 @@
 Write-permission rules (blueprint section 8 table) are enforced here:
 - 자동 채움 (auto-fill): 회사명/직무명/공고링크/마감일/기술스택/연차요건/점수 are
   always written from JobPosting/Evaluation (점수 is the sum of the five
-  Evaluation.scores components, omitted when there's no evaluation, e.g. a
-  hard-filtered posting). 기업규모/도메인 are also auto-filled, but only when
+  Evaluation.scores components, sent as an EXPLICIT null -- not omitted --
+  when there's no evaluation, e.g. a hard-filtered posting; explicit null is
+  what clears a stale score left over from a prior evaluation on an update).
+  기업규모/도메인 are also auto-filled, but only when
   JobPosting.company_size/domain exactly matches one of Notion's fixed select
   options -- otherwise the column is left blank and the guess is mentioned as
   "추정: OO" text in 결과분석 instead (see format_result_analysis).
@@ -251,7 +253,10 @@ def format_result_analysis(
     Leads with qualitative fit/mismatch reasoning (which parts match, which
     don't) built from the evidence/gaps fields, since that's what a human
     scans first when deciding whether to apply. The numeric score breakdown
-    is kept as a secondary reference line, not the headline.
+    is kept as a secondary reference line, not the headline. evidence_quality
+    is surfaced right under the verdict, and risks (when present) get their
+    own section between the gap list and the cover-letter topics -- both
+    were previously collected on the Evaluation model but never shown here.
 
     uncertain_company_size/uncertain_domain are only for the case where the
     guess doesn't match a fixed Notion select option -- they get mentioned
@@ -270,6 +275,7 @@ def format_result_analysis(
     lines = [
         f"[{version} 평가결과 / {date_str}]",
         f"판정: {evaluation.verdict}",
+        f"정보 충분도: {evaluation.evidence_quality}",
         "",
         "적합한 부분:",
     ]
@@ -287,6 +293,9 @@ def format_result_analysis(
         for e in weak_evidence
     ] + [f"- {gap}" for gap in evaluation.gaps]
     lines += weak_lines if weak_lines else ["- (특별히 없음)"]
+
+    if evaluation.risks:
+        lines += ["", "위험 요인:"] + [f"- {risk}" for risk in evaluation.risks]
 
     if evaluation.cover_letter_topics:
         lines += ["", f"자소서 소재: {', '.join(evaluation.cover_letter_topics)}"]
@@ -357,8 +366,10 @@ def _build_properties(
         properties["공고링크"] = _url(job.source_url)
     if version is not None:
         properties["평가기준버전"] = _rich_text(version)
-    if total_score is not None:
-        properties["점수"] = _number(total_score)
+    # 항상 명시적으로 보낸다 (total_score=None이면 {"number": None}) -- 평가 없이
+    # 필터 탈락으로 기존 행을 업데이트할 때, 이전에 평가받아 남아 있던 점수가 그대로
+    # 남는 걸 방지한다 (키를 생략하면 Notion update는 기존 값을 건드리지 않는다).
+    properties["점수"] = _number(total_score)
 
     matched_size = match_company_size(job.company_size)
     if matched_size:

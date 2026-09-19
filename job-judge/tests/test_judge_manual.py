@@ -72,7 +72,7 @@ def test_hard_filter_rejection_saves_and_exits(tmp_path, monkeypatch):
     assert len(save_calls) == 1
     _, kwargs = save_calls[0]
     assert kwargs.get("evaluation") is None
-    assert kwargs.get("filtered_reason") == ["경력 3년 이상 요구"]
+    assert kwargs.get("filtered_reason") == ["경력 3년 이상 요구 (신입 지원 경로 없음)"]
 
 
 def test_pass_without_evaluation_does_not_save(tmp_path, monkeypatch):
