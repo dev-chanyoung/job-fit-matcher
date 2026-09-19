@@ -21,7 +21,7 @@
    ```
    python judge_manual.py <job.json>
    ```
-   - 탈락(`required_years`에 "3년" 포함 / `deadline` 지남)이면 자동으로 Notion 저장 후 종료.
+   - 탈락(`required_years`에 "3년 이상" 포함 / `deadline` 지남)이면 자동으로 Notion 저장 후 종료.
      **평가 단계로 넘어가지 않는다 — 토큰 낭비 방지.** (`education_requirement`의 "졸업자만
      지원 가능" 문구는 탈락 사유로 취급하지 않는다 — 지원자는 2026년 8월에 이미 졸업했으므로
      이 요건은 애초에 걸릴 일이 없다. 2026-09-19 사용자 확인.)

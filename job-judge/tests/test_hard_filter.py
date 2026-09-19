@@ -46,6 +46,17 @@ class TestHardFilterFail:
         )
         assert hard_filter(job) == (False, ["경력 3년 이상 요구"])
 
+    def test_pass_required_years_3_or_fewer_not_flagged(self):
+        # "3년 이하"는 신입도 포함하는 요건이라 "3년 이상 요구"와는 반대 의미다.
+        job = JobPosting(
+            **_valid_job_kwargs(
+                required_years="신입 또는 유관경력 3년 이하",
+                deadline=FUTURE_DATE,
+                education_requirement=None,
+            )
+        )
+        assert hard_filter(job) == (True, [])
+
     def test_fail_deadline_only(self):
         job = JobPosting(
             **_valid_job_kwargs(

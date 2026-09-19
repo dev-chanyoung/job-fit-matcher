@@ -35,7 +35,7 @@ def hard_filter(job: JobPosting) -> tuple[bool, list[str]]:
     """
     reasons: list[str] = []
 
-    if job.required_years and "3년" in job.required_years:
+    if job.required_years and "3년 이상" in job.required_years:
         reasons.append("경력 3년 이상 요구")
 
     if job.deadline and is_past(job.deadline):
