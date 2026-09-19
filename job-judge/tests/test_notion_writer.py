@@ -187,6 +187,23 @@ class TestFormatResultAnalysis:
 
         assert "⚠ 점수-판정 불일치" not in text
 
+    def test_shows_score_breakdown_line_under_reference_score(self):
+        evaluation = _valid_evaluation(
+            score_breakdown={
+                "기술스택_일치": "Java 100%x2, Spring 75%x2, Redis 25%x1 -> 75% -> 18.75/25 -> 19점"
+            }
+        )
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "기술스택: Java 100%x2, Spring 75%x2, Redis 25%x1 -> 75% -> 18.75/25 -> 19점" in text
+        assert text.index("(참고) 배점:") < text.index("기술스택: Java 100%x2")
+
+    def test_omits_breakdown_lines_when_empty(self):
+        evaluation = _valid_evaluation(score_breakdown={})
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "->" not in text
+
     def test_no_warning_when_verdict_is_not_strong_apply(self):
         evaluation = _valid_evaluation(
             verdict="보류",

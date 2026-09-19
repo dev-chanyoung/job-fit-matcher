@@ -49,6 +49,11 @@ class Evaluation(BaseModel):
     cover_letter_topics: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     evidence_quality: Literal["근거 충분", "일부 부족", "자료 부족"]
+    # 카테고리별 점수 계산 근거를 한 줄로 남기는 선택 필드 (2026-09-19). 예:
+    # "Java 100%x2, Spring 75%x2, Redis 25%x1 -> 75% -> 18.75/25 -> 19점".
+    # SCORE_CAPS 키가 아닌 카테고리는 거절하지만, 항목 전체를 채울 필요는 없다
+    # (요구사항이 하나뿐이라 계산이랄 게 없는 카테고리는 생략 가능).
+    score_breakdown: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("scores")
     @classmethod
@@ -68,4 +73,12 @@ class Evaluation(BaseModel):
             value = v[key]
             if not (0 <= value <= cap):
                 raise ValueError(f"{key}는 0~{cap} 범위여야 합니다 (받은 값: {value})")
+        return v
+
+    @field_validator("score_breakdown")
+    @classmethod
+    def _validate_score_breakdown_keys(cls, v: dict[str, str]) -> dict[str, str]:
+        unknown = set(v) - set(SCORE_CAPS)
+        if unknown:
+            raise ValueError(f"score_breakdown에 알 수 없는 키가 있습니다: {sorted(unknown)}")
         return v

@@ -149,3 +149,21 @@ class TestEvaluationScoresValidation:
         evaluation = Evaluation(**_valid_evaluation_kwargs(scores=scores))
         assert evaluation.scores["필수요건_충족"] == 30
         assert evaluation.scores["기술스택_일치"] == 0
+
+
+class TestScoreBreakdown:
+    def test_defaults_to_empty_dict(self):
+        evaluation = Evaluation(**_valid_evaluation_kwargs())
+        assert evaluation.score_breakdown == {}
+
+    def test_valid_key_is_accepted(self):
+        kwargs = _valid_evaluation_kwargs(
+            score_breakdown={"기술스택_일치": "Java 100%x2, Redis 25%x1 -> 75% -> 19점"}
+        )
+        evaluation = Evaluation(**kwargs)
+        assert evaluation.score_breakdown["기술스택_일치"] == "Java 100%x2, Redis 25%x1 -> 75% -> 19점"
+
+    def test_unknown_key_raises(self):
+        kwargs = _valid_evaluation_kwargs(score_breakdown={"기술스택일치": "오타 키"})
+        with pytest.raises(ValidationError):
+            Evaluation(**kwargs)

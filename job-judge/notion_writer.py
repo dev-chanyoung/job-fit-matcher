@@ -322,6 +322,12 @@ def format_result_analysis(
         lines += ["", f"자소서 소재: {', '.join(evaluation.cover_letter_topics)}"]
 
     lines += ["", f"(참고) 배점: {score_parts} (총{total})"]
+    if evaluation.score_breakdown:
+        lines += [
+            f"  - {label}: {evaluation.score_breakdown[key]}"
+            for key, label in SCORE_LABELS
+            if key in evaluation.score_breakdown
+        ]
     if uncertain_company_size:
         lines.append(f"추정 기업규모: {uncertain_company_size} (고정 옵션에 없어 컬럼 미기입)")
     if uncertain_domain:
