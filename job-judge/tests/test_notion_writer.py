@@ -216,6 +216,15 @@ class TestSaveNewRow:
         assert "추정 기업규모: 공기업" in analysis_text
         assert "추정 도메인: 항공운송업" in analysis_text
 
+    def test_writes_score_as_sum_of_evaluation_components(self):
+        mock_client = _mock_client_with_data_source([])
+
+        save(_valid_job(), _valid_evaluation(), client=mock_client, db_id="fake-db-id")
+
+        _, kwargs = mock_client.pages.create.call_args
+        properties = kwargs["properties"]
+        assert properties["점수"] == {"number": 76}
+
     def test_new_page_defaults_status_to_interested(self):
         """A brand-new row gets 지원상태 defaulted to 관심있음 so it sorts
         correctly alongside postings a human has already triaged."""
@@ -280,6 +289,23 @@ class TestSaveExistingRow:
 
 
 class TestSaveHardFiltered:
+    def test_hard_filtered_posting_has_no_score(self):
+        """No Evaluation exists for a hard-filtered posting, so 점수 must be
+        omitted rather than written as 0 (0 would misleadingly read as 'scored
+        and got zero' instead of 'never evaluated')."""
+        mock_client = _mock_client_with_data_source([])
+
+        save(
+            _valid_job(),
+            evaluation=None,
+            filtered_reason=["마감 지남"],
+            client=mock_client,
+            db_id="fake-db-id",
+        )
+
+        _, kwargs = mock_client.pages.create.call_args
+        assert "점수" not in kwargs["properties"]
+
     def test_new_row_with_filtered_reason_and_no_evaluation(self):
         mock_client = _mock_client_with_data_source([])
 

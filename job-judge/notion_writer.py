@@ -1,8 +1,10 @@
 """Existing tracker lookup/dedup + save to Notion (see docs blueprint section 8).
 
 Write-permission rules (blueprint section 8 table) are enforced here:
-- 자동 채움 (auto-fill): 회사명/직무명/공고링크/마감일/기술스택/연차요건 are always
-  written from JobPosting. 기업규모/도메인 are also auto-filled, but only when
+- 자동 채움 (auto-fill): 회사명/직무명/공고링크/마감일/기술스택/연차요건/점수 are
+  always written from JobPosting/Evaluation (점수 is the sum of the five
+  Evaluation.scores components, omitted when there's no evaluation, e.g. a
+  hard-filtered posting). 기업규모/도메인 are also auto-filled, but only when
   JobPosting.company_size/domain exactly matches one of Notion's fixed select
   options -- otherwise the column is left blank and the guess is mentioned as
   "추정: OO" text in 결과분석 instead (see format_result_analysis).
@@ -316,6 +318,10 @@ def _date(content: str | None) -> dict:
     return {"date": {"start": content}}
 
 
+def _number(value: int | None) -> dict:
+    return {"number": value}
+
+
 def _select(name: str) -> dict:
     return {"select": {"name": name}}
 
@@ -328,10 +334,11 @@ def _build_properties(
     job: JobPosting,
     result_analysis_text: str,
     version: str | None,
+    total_score: int | None = None,
 ) -> dict:
     """Build a Notion properties dict containing ONLY the fields automation
     is permitted to write: 자동 채움 fields + 기술스택 + 연차요건 + 결과분석
-    (+ 평가기준버전 when a version is given).
+    (+ 평가기준버전 when a version is given, + 점수 when total_score is given).
 
     자동화 금지 fields (우선순위/지원동기메모) are never constructed here -- they
     simply have no code path that adds them to this dict. 지원상태 is also
@@ -350,6 +357,8 @@ def _build_properties(
         properties["공고링크"] = _url(job.source_url)
     if version is not None:
         properties["평가기준버전"] = _rich_text(version)
+    if total_score is not None:
+        properties["점수"] = _number(total_score)
 
     matched_size = match_company_size(job.company_size)
     if matched_size:
@@ -428,11 +437,13 @@ def save(
             uncertain_company_size=uncertain_company_size,
             uncertain_domain=uncertain_domain,
         )
+        total_score = sum(evaluation.scores.get(key, 0) for key, _ in SCORE_LABELS)
     else:
         reasons = ", ".join(filtered_reason or [])
         result_analysis_text = f"필터 탈락: {reasons}"
+        total_score = None
 
-    properties = _build_properties(job, result_analysis_text, version)
+    properties = _build_properties(job, result_analysis_text, version, total_score)
 
     existing_page_id = None
     if job.source_url:
