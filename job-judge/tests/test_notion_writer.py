@@ -257,6 +257,27 @@ class TestSaveExistingRow:
         properties = kwargs["properties"]
         assert UPDATE_PROTECTED_KEYS.isdisjoint(properties.keys())
 
+    def test_dedup_filter_matches_url_and_position_not_url_alone(self):
+        """A group-recruiting notice (e.g. a Korean 대기업 공동채용 posting)
+        commonly lists many distinct roles under one shared 공고링크. Matching
+        an existing row by URL alone would make every role saved from that
+        page collide into a single row, silently overwriting one role's data
+        with another's (real bug: this happened with a O그룹 posting
+        where multiple subsidiaries/roles shared one jobnoticeSn URL)."""
+        mock_client = _mock_client_with_data_source([])
+
+        job = _valid_job(position="백엔드 개발자 B")
+        save(job, _valid_evaluation(), client=mock_client, db_id="fake-db-id")
+
+        _, kwargs = mock_client.data_sources.query.call_args
+        condition = kwargs["filter"]["and"]
+        assert {"property": "공고링크", "url": {"equals": job.source_url}} in condition
+        assert {"property": "직무명", "rich_text": {"equals": "백엔드 개발자 B"}} in condition
+        # No existing row matches this URL+position pair, so it must create,
+        # not update -- even though another role at the same URL might exist.
+        mock_client.pages.create.assert_called_once()
+        mock_client.pages.update.assert_not_called()
+
 
 class TestSaveHardFiltered:
     def test_new_row_with_filtered_reason_and_no_evaluation(self):

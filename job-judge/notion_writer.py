@@ -388,8 +388,13 @@ def save(
 ) -> None:
     """Create or update a row in the 백엔드_공고_트래커 Notion DB for job.
 
-    Looks up an existing row by 공고링크 == job.source_url. If found, updates
-    it; otherwise creates a new page. In both cases the properties payload
+    Looks up an existing row by 공고링크 == job.source_url AND 직무명 ==
+    job.position (not URL alone -- a single group-recruiting posting, e.g. a
+    Korean 대기업 공동채용 notice, commonly lists many distinct roles under one
+    shared URL; matching on URL alone would treat every role saved from that
+    same page as "the same posting" and silently overwrite one row's data
+    with another role's evaluation). If found, updates it; otherwise creates
+    a new page. In both cases the properties payload
     contains only 자동 채움 + 기술스택 + 연차요건 + 기업규모/도메인(고정 옵션
     매칭 시) + 결과분석 (+ 평가기준버전) fields -- 우선순위/지원동기메모 are
     never included, and 지원상태 is added ONLY for a brand-new page (never on
@@ -434,8 +439,10 @@ def save(
         query_result = client.data_sources.query(
             data_source_id=data_source_id,
             filter={
-                "property": "공고링크",
-                "url": {"equals": job.source_url},
+                "and": [
+                    {"property": "공고링크", "url": {"equals": job.source_url}},
+                    {"property": "직무명", "rich_text": {"equals": job.position}},
+                ]
             },
         )
         results = query_result.get("results", [])
