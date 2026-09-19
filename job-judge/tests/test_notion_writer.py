@@ -156,6 +156,52 @@ class TestFormatResultAnalysis:
 
         assert "위험 요인:" not in text
 
+    def test_warns_when_mandatory_score_too_low_for_strong_verdict(self):
+        evaluation = _valid_evaluation(
+            verdict="적극 지원",
+            scores={
+                "필수요건_충족": 0,
+                "기술스택_일치": 25,
+                "업무내용_일치": 20,
+                "우대사항": 15,
+                "도메인_연관성": 10,
+            },
+        )
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "⚠ 점수-판정 불일치" in text
+        assert "적극 지원" in text  # verdict itself is not overwritten
+
+    def test_no_warning_when_mandatory_score_is_sufficient(self):
+        evaluation = _valid_evaluation(
+            verdict="적극 지원",
+            scores={
+                "필수요건_충족": 28,
+                "기술스택_일치": 18,
+                "업무내용_일치": 15,
+                "우대사항": 10,
+                "도메인_연관성": 5,
+            },
+        )
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "⚠ 점수-판정 불일치" not in text
+
+    def test_no_warning_when_verdict_is_not_strong_apply(self):
+        evaluation = _valid_evaluation(
+            verdict="보류",
+            scores={
+                "필수요건_충족": 0,
+                "기술스택_일치": 0,
+                "업무내용_일치": 0,
+                "우대사항": 0,
+                "도메인_연관성": 0,
+            },
+        )
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "⚠ 점수-판정 불일치" not in text
+
     def test_weak_and_unconfirmed_evidence_lands_in_gap_section(self):
         evaluation = _valid_evaluation(
             evidence=[

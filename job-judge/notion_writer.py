@@ -27,7 +27,14 @@ import os
 from datetime import datetime
 
 from hard_filter import is_past
-from schemas import Evaluation, JobPosting
+from schemas import SCORE_CAPS, Evaluation, JobPosting
+
+# 필수요건_충족이 배점 대비 1/3 미만인데 verdict가 "적극 지원"이면 결과분석에 경고를
+# 붙인다 (2026-09-19). CLAUDE.md에는 이 규칙이 LLM이 지켜야 할 지침으로만 적혀 있었는데,
+# 실제로 코드에 검사가 없어서 안 지켜져도 아무 표시가 안 되는 게 확인됐다 -- 판정을
+# 강제로 덮어쓰지는 않고, 경고만 코드가 확실하게 붙인다.
+_MANDATORY_SCORE_KEY = "필수요건_충족"
+_MANDATORY_WARNING_RATIO = 1 / 3
 
 DB_NAME = "백엔드_공고_트래커"
 
@@ -257,6 +264,9 @@ def format_result_analysis(
     is surfaced right under the verdict, and risks (when present) get their
     own section between the gap list and the cover-letter topics -- both
     were previously collected on the Evaluation model but never shown here.
+    A score-verdict contradiction warning (필수요건_충족 too low for an
+    "적극 지원" verdict) is now enforced here in code, not left to the LLM
+    to remember to write.
 
     uncertain_company_size/uncertain_domain are only for the case where the
     guess doesn't match a fixed Notion select option -- they get mentioned
@@ -275,6 +285,17 @@ def format_result_analysis(
     lines = [
         f"[{version} 평가결과 / {date_str}]",
         f"판정: {evaluation.verdict}",
+    ]
+
+    mandatory_cap = SCORE_CAPS[_MANDATORY_SCORE_KEY]
+    mandatory_score = scores.get(_MANDATORY_SCORE_KEY, 0)
+    if evaluation.verdict == "적극 지원" and mandatory_score < mandatory_cap * _MANDATORY_WARNING_RATIO:
+        lines.append(
+            f"⚠ 점수-판정 불일치: 필수요건 근거 부족({mandatory_score}/{mandatory_cap})에도 "
+            "적극 지원으로 판정함"
+        )
+
+    lines += [
         f"정보 충분도: {evaluation.evidence_quality}",
         "",
         "적합한 부분:",

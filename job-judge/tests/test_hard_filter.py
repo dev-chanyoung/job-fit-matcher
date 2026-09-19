@@ -76,6 +76,35 @@ class TestHardFilterFail:
         )
         assert hard_filter(job) == (True, [])
 
+    def test_pass_zero_years_range(self):
+        # "0~3년"의 최소 연차는 0이므로 사실상 경력무관과 같다 -- 탈락 사유가 아니다.
+        job = JobPosting(**_valid_job_kwargs(required_years="경력 0~3년", deadline=FUTURE_DATE))
+        assert hard_filter(job) == (True, [])
+
+    def test_pass_zero_years_at_least(self):
+        job = JobPosting(**_valid_job_kwargs(required_years="경력 0년 이상", deadline=FUTURE_DATE))
+        assert hard_filter(job) == (True, [])
+
+    def test_fail_new_grad_explicitly_disallowed(self):
+        # "신입"이라는 글자만 보고 대체경로로 착각하면 안 된다 -- 여기선 신입을 명시적으로 배제한다.
+        job = JobPosting(
+            **_valid_job_kwargs(
+                required_years="경력 3년 이상 (신입 지원 불가)", deadline=FUTURE_DATE
+            )
+        )
+        passed, _ = hard_filter(job)
+        assert passed is False
+
+    def test_fail_preference_in_different_clause_does_not_cover_mandatory_years(self):
+        # "우대"는 금융권 경험에만 붙어 있다 -- 앞의 "경력 3년 이상"까지 우대로 봐주면 안 된다.
+        job = JobPosting(
+            **_valid_job_kwargs(
+                required_years="경력 3년 이상, 금융권 경험 우대", deadline=FUTURE_DATE
+            )
+        )
+        passed, _ = hard_filter(job)
+        assert passed is False
+
     def test_pass_required_years_3_or_fewer_not_flagged(self):
         # "3년 이하"는 신입도 포함하는 요건이라 "3년 이상 요구"와는 반대 의미다.
         job = JobPosting(
@@ -155,6 +184,16 @@ class TestExtractMandatoryMinYears:
 
     def test_range_without_isang_returns_lower_bound(self):
         assert extract_mandatory_min_years("3~5년") == 3
+
+    def test_zero_minimum_returns_none(self):
+        assert extract_mandatory_min_years("경력 0~3년") is None
+        assert extract_mandatory_min_years("경력 0년 이상") is None
+
+    def test_new_grad_negation_is_not_an_alternative(self):
+        assert extract_mandatory_min_years("경력 3년 이상 (신입 지원 불가)") == 3
+
+    def test_preference_in_unrelated_clause_does_not_cover_mandatory_years(self):
+        assert extract_mandatory_min_years("경력 3년 이상, 금융권 경험 우대") == 3
 
 
 class TestIsPast:
