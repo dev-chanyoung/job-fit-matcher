@@ -56,7 +56,8 @@ class TestHardFilterFail:
         )
         assert hard_filter(job) == (False, ["마감 지남"])
 
-    def test_fail_education_graduates_only(self):
+    def test_pass_education_graduates_only_not_flagged(self):
+        # 지원자는 이미 졸업했으므로 "졸업자만 지원 가능" 요건은 탈락 사유가 아니다.
         job = JobPosting(
             **_valid_job_kwargs(
                 required_years=None,
@@ -64,9 +65,7 @@ class TestHardFilterFail:
                 education_requirement="학사 졸업자",
             )
         )
-        passed, reasons = hard_filter(job)
-        assert passed is False
-        assert reasons == ["학사 졸업자 요건 (졸업예정자 아님)"]
+        assert hard_filter(job) == (True, [])
 
     def test_pass_education_soon_to_graduate_not_flagged(self):
         job = JobPosting(

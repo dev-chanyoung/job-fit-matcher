@@ -41,10 +41,10 @@ def hard_filter(job: JobPosting) -> tuple[bool, list[str]]:
     if job.deadline and is_past(job.deadline):
         reasons.append("마감 지남")
 
-    if job.education_requirement:
-        # 졸업예정자(soon-to-graduate)는 "졸업자만" 요건으로 취급하지 않는다.
-        # "졸업자"가 포함되어 있어도 "졸업예정"이 포함되어 있으면 플래그하지 않음.
-        if "졸업자" in job.education_requirement and "졸업예정" not in job.education_requirement:
-            reasons.append("학사 졸업자 요건 (졸업예정자 아님)")
+    # 지원자는 2026년 8월에 이미 졸업했다 (2026-09-17 프로필 갱신, 2026-09-19 사용자 확인).
+    # "졸업자만 지원 가능"(졸업예정자 불가) 같은 요건은 이미 학위를 보유한 지원자에게는
+    # 애초에 걸릴 일이 없는 조건이므로, education_requirement 기반 탈락 규칙은 여기서
+    # 다루지 않는다 (예전에는 "아직 졸업 전" 프로필을 가정해 이 텍스트를 탈락 사유로
+    # 취급했었음 -- 그 가정이 더 이상 맞지 않아 제거함).
 
     return (len(reasons) == 0, reasons)
