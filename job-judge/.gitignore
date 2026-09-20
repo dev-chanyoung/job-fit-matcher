@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 cj_imgs/
+.fork_scratch/
+.playwright-mcp/
