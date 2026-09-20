@@ -336,6 +336,19 @@ def format_result_analysis(
     return "\n".join(lines)
 
 
+def format_verdict_summary(evaluation: Evaluation, version: str = "v1") -> str:
+    """One-line summary for the 결과분석 TABLE PROPERTY -- verdict + total
+    score only, so the table view stays scannable instead of showing the
+    full multi-paragraph breakdown inline in every cell (2026-09-20 사용자
+    요청: 표에서는 판정 결과 한 줄만 보이고, 상세 내용은 페이지를 열어야(클릭)
+    보이도록 해달라는 요청). The full breakdown from format_result_analysis
+    still belongs in the page BODY (as blocks), not in this property.
+    """
+    total = sum(evaluation.scores.get(key, 0) for key, _ in SCORE_LABELS)
+    date_str = datetime.now().date().isoformat()
+    return f"[{version}/{date_str}] {evaluation.verdict} (총점 {total}, 정보충분도: {evaluation.evidence_quality})"
+
+
 def _title(content: str) -> dict:
     return {"title": [{"text": {"content": content}}]}
 
@@ -344,8 +357,19 @@ def _rich_text(content: str) -> dict:
     return {"rich_text": [{"text": {"content": content}}]}
 
 
-def _url(content: str | None) -> dict:
-    return {"url": content}
+LINK_ICON = "\U0001F517"  # link icon; only text visible in the 공고링크 column
+
+
+def _link_icon(url: str | None) -> dict:
+    """A rich_text property whose only visible content is a link-icon glyph,
+    hyperlinked to url (empty rich_text list when there's no URL). Used for
+    공고링크 instead of Notion's plain "url" property type so the table view
+    shows a short icon instead of the full (often very long) posting URL --
+    2026-09-20 사용자 요청. The full URL is preserved as the run's href/link,
+    just not shown as text."""
+    if not url:
+        return {"rich_text": []}
+    return {"rich_text": [{"text": {"content": LINK_ICON, "link": {"url": url}}}]}
 
 
 def _date(content: str | None) -> dict:
@@ -390,7 +414,7 @@ def _build_properties(
         "결과분석": _rich_text(result_analysis_text),
     }
     if job.source_url:
-        properties["공고링크"] = _url(job.source_url)
+        properties["공고링크"] = _link_icon(job.source_url)
     if version is not None:
         properties["평가기준버전"] = _rich_text(version)
     # 항상 명시적으로 보낸다 (total_score=None이면 {"number": None}) -- 평가 없이
@@ -425,6 +449,41 @@ def _resolve_data_source_id(client, db_id: str) -> str:
     return data_sources[0]["id"]
 
 
+def _link_url_of(link_icon_prop: dict) -> str | None:
+    """Extract the href out of a 공고링크-shaped rich_text property value
+    (the read-shape dict returned by the API), or None if it's empty."""
+    runs = link_icon_prop.get("rich_text", []) if link_icon_prop else []
+    if not runs:
+        return None
+    run = runs[0]
+    return run.get("href") or run.get("text", {}).get("link", {}).get("url")
+
+
+def _find_existing_page_id(client, data_source_id: str, source_url: str, position: str) -> str | None:
+    """Find an existing row matching both source_url and position.
+
+    공고링크 is stored as a rich_text hyperlink-icon, not a url property
+    (2026-09-20 icon-link migration -- see _link_icon), so Notion's query
+    API can no longer filter on the href server-side. Candidates are
+    narrowed by 직무명 (still filterable), then matched on href in Python --
+    this DB is small enough for that to be cheap, and it preserves the
+    same URL+position uniqueness guarantee the old url-property filter gave
+    (not URL alone -- a single group-recruiting posting, e.g. a Korean
+    대기업 공동채용 notice, commonly lists many distinct roles under one
+    shared URL; matching on URL alone would treat every role saved from
+    that same page as "the same posting" and silently overwrite one role's
+    data with another's).
+    """
+    query_result = client.data_sources.query(
+        data_source_id=data_source_id,
+        filter={"property": "직무명", "rich_text": {"equals": position}},
+    )
+    for page in query_result.get("results", []):
+        if _link_url_of(page["properties"].get("공고링크", {})) == source_url:
+            return page["id"]
+    return None
+
+
 def save(
     job: JobPosting,
     evaluation: Evaluation | None,
@@ -435,20 +494,23 @@ def save(
 ) -> None:
     """Create or update a row in the 백엔드_공고_트래커 Notion DB for job.
 
-    Looks up an existing row by 공고링크 == job.source_url AND 직무명 ==
-    job.position (not URL alone -- a single group-recruiting posting, e.g. a
-    Korean 대기업 공동채용 notice, commonly lists many distinct roles under one
-    shared URL; matching on URL alone would treat every role saved from that
-    same page as "the same posting" and silently overwrite one row's data
-    with another role's evaluation). If found, updates it; otherwise creates
-    a new page. In both cases the properties payload
-    contains only 자동 채움 + 기술스택 + 연차요건 + 기업규모/도메인(고정 옵션
-    매칭 시) + 결과분석 (+ 평가기준버전) fields -- 우선순위/지원동기메모 are
-    never included, and 지원상태 is added ONLY for a brand-new page (never on
-    an update to an existing row).
+    Looks up an existing row by source_url AND position via
+    _find_existing_page_id (not URL alone -- a single group-recruiting
+    posting, e.g. a Korean 대기업 공동채용 notice, commonly lists many
+    distinct roles under one shared URL; matching on URL alone would treat
+    every role saved from that same page as "the same posting" and
+    silently overwrite one row's data with another role's evaluation). If
+    found, updates it; otherwise creates a new page. In both cases the
+    properties payload contains only 자동 채움 + 기술스택 + 연차요건 +
+    기업규모/도메인(고정 옵션 매칭 시) + 결과분석 (+ 평가기준버전) fields --
+    우선순위/지원동기메모 are never included, and 지원상태 is added ONLY for a
+    brand-new page (never on an update to an existing row).
 
-    If evaluation is None (hard-filtered case), 결과분석 is instead built from
-    filtered_reason as "필터 탈락: {reasons}".
+    결과분석 here is only a one-line verdict summary (format_verdict_summary)
+    so the table view stays scannable -- the full breakdown belongs in the
+    page BODY as blocks (via format_result_analysis), which this function
+    never writes; that's the caller's job. If evaluation is None
+    (hard-filtered case), 결과분석 is instead "필터 탈락: {reasons}".
     """
     if client is None:
         from dotenv import load_dotenv
@@ -463,18 +525,15 @@ def save(
 
     data_source_id = _resolve_data_source_id(client, db_id)
 
-    uncertain_company_size = (
-        job.company_size if job.company_size and not match_company_size(job.company_size) else None
-    )
-    uncertain_domain = job.domain if job.domain and not match_domain(job.domain) else None
-
     if evaluation is not None:
-        result_analysis_text = format_result_analysis(
-            evaluation,
-            version=version,
-            uncertain_company_size=uncertain_company_size,
-            uncertain_domain=uncertain_domain,
-        )
+        # 결과분석 프로퍼티(표에 보이는 값)는 판정 한 줄 요약만 담는다 -- 상세
+        # 근거/배점/추정 기업규모·도메인 등은 format_result_analysis()로 만들어
+        # 페이지 본문(블록)에만 넣는다 (2026-09-20 사용자 요청: 표에서는 판정만
+        # 보이고 클릭해야 상세가 보이게). uncertain_company_size/uncertain_domain은
+        # 이제 본문 블록을 쓰는 쪽(예: Claude 세션의 body-block 스크립트)에서
+        # format_result_analysis()를 호출할 때 넘겨야 한다 -- save()는 더 이상
+        # 그 텍스트를 어디에도 쓰지 않는다.
+        result_analysis_text = format_verdict_summary(evaluation, version=version)
         total_score = sum(evaluation.scores.get(key, 0) for key, _ in SCORE_LABELS)
     else:
         reasons = ", ".join(filtered_reason or [])
@@ -485,18 +544,7 @@ def save(
 
     existing_page_id = None
     if job.source_url:
-        query_result = client.data_sources.query(
-            data_source_id=data_source_id,
-            filter={
-                "and": [
-                    {"property": "공고링크", "url": {"equals": job.source_url}},
-                    {"property": "직무명", "rich_text": {"equals": job.position}},
-                ]
-            },
-        )
-        results = query_result.get("results", [])
-        if results:
-            existing_page_id = results[0]["id"]
+        existing_page_id = _find_existing_page_id(client, data_source_id, job.source_url, job.position)
 
     if existing_page_id:
         client.pages.update(page_id=existing_page_id, properties=properties)

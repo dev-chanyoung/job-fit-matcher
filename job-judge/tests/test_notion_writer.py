@@ -17,6 +17,7 @@ from notion_writer import (  # noqa: E402
     fetch_essay_question_rows,
     find_pending_questions,
     format_result_analysis,
+    format_verdict_summary,
     match_company_size,
     match_domain,
     match_tech_stack,
@@ -236,6 +237,45 @@ class TestFormatResultAnalysis:
         assert "Kafka 운영 경험 → 학습만 해봄, 실무 경험 없음 (미확인)" in gap_section
         assert "메시지 브로커 운영 경험 없음" in gap_section
 
+    def test_notes_uncertain_company_size_and_domain_when_given(self):
+        """save() no longer passes these through (결과분석 프로퍼티는 이제 한
+        줄 요약만 담음, 2026-09-20) -- but a caller building the page BODY
+        still calls format_result_analysis() directly with these, so this
+        behavior needs its own direct test now."""
+        evaluation = _valid_evaluation()
+        text = format_result_analysis(
+            evaluation,
+            version="v1",
+            uncertain_company_size="공기업",
+            uncertain_domain="항공운송업",
+        )
+
+        assert "추정 기업규모: 공기업 (고정 옵션에 없어 컬럼 미기입)" in text
+        assert "추정 도메인: 항공운송업 (고정 옵션에 없어 컬럼 미기입)" in text
+
+
+class TestFormatVerdictSummary:
+    def test_one_line_with_verdict_total_and_evidence_quality(self):
+        """The 결과분석 TABLE PROPERTY only ever gets this short line now
+        (2026-09-20 사용자 요청: 표에서는 판정 한 줄만, 상세는 페이지를 열어야
+        보이게) -- no newlines, no evidence/gaps/score-breakdown detail."""
+        evaluation = _valid_evaluation()  # verdict=지원 고려, scores sum to 76
+        text = format_verdict_summary(evaluation, version="v1.4-manual")
+
+        assert "\n" not in text
+        assert "지원 고려" in text
+        assert "76" in text
+        assert "근거 충분" in text
+        assert "v1.4-manual" in text
+
+    def test_does_not_include_evidence_or_gap_detail(self):
+        evaluation = _valid_evaluation()
+        text = format_verdict_summary(evaluation, version="v1")
+
+        assert "Spring Boot 백엔드 개발 경험" not in text
+        assert "적합한 부분" not in text
+        assert "(참고) 배점" not in text
+
 
 def _mock_client_with_data_source(query_results):
     """Build a MagicMock Notion client wired for the current (2025-09+) API,
@@ -247,6 +287,18 @@ def _mock_client_with_data_source(query_results):
     }
     mock_client.data_sources.query.return_value = {"results": query_results}
     return mock_client
+
+
+def _existing_page(page_id: str, url: str) -> dict:
+    """Shape of a data_sources.query result row whose 공고링크 is the
+    rich_text hyperlink-icon format (see notion_writer._link_icon) --
+    _find_existing_page_id reads its href back out via _link_url_of."""
+    return {
+        "id": page_id,
+        "properties": {
+            "공고링크": {"rich_text": [{"href": url, "text": {"content": "\U0001F517", "link": {"url": url}}}]}
+        },
+    }
 
 
 class TestSaveNewRow:
@@ -274,6 +326,35 @@ class TestSaveNewRow:
         properties = kwargs["properties"]
         assert NEVER_TOUCHED_KEYS.isdisjoint(properties.keys())
 
+    def test_posting_link_property_is_icon_only_hyperlink(self):
+        """공고링크 shows only a link-icon glyph in the table, hyperlinked to
+        the full URL (2026-09-20 사용자 요청 -- 표에 긴 URL 텍스트 대신
+        아이콘만 보이게)."""
+        mock_client = _mock_client_with_data_source([])
+
+        job = _valid_job()
+        save(job, _valid_evaluation(), client=mock_client, db_id="fake-db-id")
+
+        _, kwargs = mock_client.pages.create.call_args
+        run = kwargs["properties"]["공고링크"]["rich_text"][0]
+        assert run["text"]["content"] == "\U0001F517"
+        assert run["text"]["link"]["url"] == job.source_url
+
+    def test_result_analysis_property_is_the_short_verdict_summary(self):
+        """결과분석 프로퍼티는 format_verdict_summary()의 한 줄 요약이어야 한다
+        (2026-09-20) -- 전체 근거/배점 텍스트(format_result_analysis)는 더 이상
+        save()가 쓰지 않는다, 페이지 본문에만 들어간다."""
+        mock_client = _mock_client_with_data_source([])
+
+        job = _valid_job()
+        evaluation = _valid_evaluation()
+        save(job, evaluation, client=mock_client, db_id="fake-db-id")
+
+        _, kwargs = mock_client.pages.create.call_args
+        analysis_text = kwargs["properties"]["결과분석"]["rich_text"][0]["text"]["content"]
+        assert analysis_text == format_verdict_summary(evaluation, version="v1")
+        assert "\n" not in analysis_text
+
     def test_writes_company_size_and_domain_when_they_match_fixed_options(self):
         mock_client = _mock_client_with_data_source([])
 
@@ -285,7 +366,12 @@ class TestSaveNewRow:
         assert properties["기업규모"] == {"select": {"name": "대기업"}}
         assert properties["도메인"] == {"select": {"name": "IT서비스"}}
 
-    def test_falls_back_to_result_analysis_text_when_no_fixed_option_matches(self):
+    def test_leaves_columns_blank_when_no_fixed_option_matches(self):
+        """The "추정 OO: ..." note for a non-matching 기업규모/도메인 guess is
+        no longer written by save() at all (2026-09-20: 결과분석 프로퍼티는
+        판정 한 줄 요약만 담는다) -- it's format_result_analysis()'s job when
+        a caller builds the page BODY, covered separately below. save() only
+        needs to guarantee the columns themselves stay blank."""
         mock_client = _mock_client_with_data_source([])
 
         job = _valid_job(company_size="공기업", domain="항공운송업")
@@ -295,9 +381,6 @@ class TestSaveNewRow:
         properties = kwargs["properties"]
         assert "기업규모" not in properties
         assert "도메인" not in properties
-        analysis_text = properties["결과분석"]["rich_text"][0]["text"]["content"]
-        assert "추정 기업규모: 공기업" in analysis_text
-        assert "추정 도메인: 항공운송업" in analysis_text
 
     def test_writes_score_as_sum_of_evaluation_components(self):
         mock_client = _mock_client_with_data_source([])
@@ -334,9 +417,11 @@ class TestSaveExistingRow:
     def test_updates_existing_page_without_protected_fields(self):
         """An update must never touch 지원상태 either -- the default in
         TestSaveNewRow is strictly a create-time, one-time thing."""
-        mock_client = _mock_client_with_data_source([{"id": "existing-page-id"}])
-
         job = _valid_job()
+        mock_client = _mock_client_with_data_source(
+            [_existing_page("existing-page-id", job.source_url)]
+        )
+
         evaluation = _valid_evaluation()
 
         save(job, evaluation, client=mock_client, db_id="fake-db-id")
@@ -355,17 +440,24 @@ class TestSaveExistingRow:
         an existing row by URL alone would make every role saved from that
         page collide into a single row, silently overwriting one role's data
         with another's (real bug: this happened with a O그룹 posting
-        where multiple subsidiaries/roles shared one jobnoticeSn URL)."""
-        mock_client = _mock_client_with_data_source([])
+        where multiple subsidiaries/roles shared one jobnoticeSn URL).
+
+        공고링크 is a rich_text hyperlink-icon (not a url property, since the
+        2026-09-20 icon-link migration), so the server-side filter can only
+        narrow by 직무명 -- the URL match happens in Python via href
+        (_find_existing_page_id/_link_url_of). This test's one candidate
+        shares the position but has a DIFFERENT url, so it must still be
+        treated as a different posting (create, not update)."""
+        mock_client = _mock_client_with_data_source(
+            [_existing_page("other-role-page-id", "https://example.com/job/different-role")]
+        )
 
         job = _valid_job(position="백엔드 개발자 B")
         save(job, _valid_evaluation(), client=mock_client, db_id="fake-db-id")
 
         _, kwargs = mock_client.data_sources.query.call_args
-        condition = kwargs["filter"]["and"]
-        assert {"property": "공고링크", "url": {"equals": job.source_url}} in condition
-        assert {"property": "직무명", "rich_text": {"equals": "백엔드 개발자 B"}} in condition
-        # No existing row matches this URL+position pair, so it must create,
+        assert kwargs["filter"] == {"property": "직무명", "rich_text": {"equals": "백엔드 개발자 B"}}
+        # The one candidate returned has a different URL, so it must create,
         # not update -- even though another role at the same URL might exist.
         mock_client.pages.create.assert_called_once()
         mock_client.pages.update.assert_not_called()
@@ -398,10 +490,13 @@ class TestSaveHardFiltered:
         update must explicitly null out 점수 instead of leaving the old
         score in place (real bug: omitting the key on update sends no
         instruction to Notion, so a prior score silently lingers)."""
-        mock_client = _mock_client_with_data_source([{"id": "existing-page-id"}])
+        job = _valid_job()
+        mock_client = _mock_client_with_data_source(
+            [_existing_page("existing-page-id", job.source_url)]
+        )
 
         save(
-            _valid_job(),
+            job,
             evaluation=None,
             filtered_reason=["마감 지남"],
             client=mock_client,
