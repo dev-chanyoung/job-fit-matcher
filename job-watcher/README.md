@@ -11,7 +11,7 @@
 
 ## 동작 방식
 
-1. 매일 정해진 시각(기본: 오전 10시 KST, `vercel.json`의 `schedule` 참고)에
+1. 매일 정해진 시각(기본: 오전 9시 KST, `vercel.json`의 `schedule` 참고)에
    Vercel이 `/api/check-postings`를 호출한다.
 2. 등록된 각 사이트 모듈(`lib/jasoseol.ts`, `lib/saramin.ts`)이 각자의 검색
    페이지를 fetch해서 공고 목록을 파싱한다 — 둘 다 서버가 완성된 HTML/JSON을
@@ -64,9 +64,9 @@ Vercel 프로젝트 설정에 넣은 값이 쓰인다 — 둘은 별개다.**
 ## 실행 주기 바꾸기
 
 `vercel.json`의 `crons[0].schedule`을 수정하면 된다. cron 표현식은 항상
-UTC 기준이고(예: 오전 10시 KST = `0 1 * * *`), Hobby(무료) 플랜은 하루 1회로
-제한되며 지정한 시(hour) 안에서 임의 시각에 실행된다(예: `0 1 * * *`는
-01:00~01:59 UTC 사이 아무 때나).
+UTC 기준이고(예: 오전 9시 KST = `0 0 * * *`), Hobby(무료) 플랜은 하루 1회로
+제한되며 지정한 시(hour) 안에서 임의 시각에 실행된다(예: `0 0 * * *`는
+00:00~00:59 UTC 사이 아무 때나).
 
 ## 개발
 
