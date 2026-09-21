@@ -6,6 +6,12 @@ import type { Posting } from "./types.js";
 // table (a code block also disables markdown, which would kill the link).
 const DISCORD_MAX_FIELDS_PER_EMBED = 25;
 const DISCORD_MAX_EMBEDS_PER_MESSAGE = 10;
+// Discord's 6000-char limit is the SUM across every embed in one message,
+// not per embed (confirmed live 2026-09-22: a real 84-posting run split
+// purely by field count produced an embed set over this total and Discord
+// rejected the whole message with HTTP 400). Margin under the real 6000 to
+// leave room for the title and any per-embed structural overhead.
+const DISCORD_MESSAGE_CHAR_BUDGET = 5500;
 const EMBED_COLOR = 0x5865f2; // Discord blurple
 
 export interface DiscordEmbedField {
@@ -41,29 +47,57 @@ function postingToField(posting: Posting): DiscordEmbedField {
   };
 }
 
-// Groups newPostings into embeds (<=25 fields each, Discord's cap) and those
-// embeds into messages (<=10 embeds each, Discord's other cap) -- returns
-// one array of embeds per webhook POST that sendDiscordNotification should
-// make. At the volumes this project actually sees (tens of postings/day)
-// this is always exactly one message with one or two embeds; the extra
-// grouping layer exists so a much larger day degrades safely instead of
-// silently dropping postings past Discord's limits.
+// Groups newPostings into embeds/messages respecting all three of Discord's
+// limits at once: <=25 fields per embed, <=10 embeds per message, and
+// <=~6000 total characters (name+value summed across every field in every
+// embed) per message. Packs greedily field-by-field so whichever limit is
+// hit first closes the current embed/message -- at realistic posting counts
+// the char budget is what actually bites (each field runs ~150-350 chars
+// once a real URL and title are in it, so 25 fields alone can already
+// exceed 6000). At the volumes this project sees (tens of postings/day)
+// this is usually one message with a couple of embeds; the grouping exists
+// so a much larger day degrades safely instead of Discord rejecting the
+// whole webhook call.
 export function formatDiscordEmbeds(newPostings: Posting[]): DiscordEmbed[][] {
   if (newPostings.length === 0) return [];
 
-  const embeds: DiscordEmbed[] = [];
-  for (let i = 0; i < newPostings.length; i += DISCORD_MAX_FIELDS_PER_EMBED) {
-    const slice = newPostings.slice(i, i + DISCORD_MAX_FIELDS_PER_EMBED);
-    embeds.push({
-      color: EMBED_COLOR,
-      fields: slice.map(postingToField),
-    });
-  }
-  embeds[0].title = `📋 신규 공고 ${newPostings.length}건`;
-
   const messages: DiscordEmbed[][] = [];
-  for (let i = 0; i < embeds.length; i += DISCORD_MAX_EMBEDS_PER_MESSAGE) {
-    messages.push(embeds.slice(i, i + DISCORD_MAX_EMBEDS_PER_MESSAGE));
+  let messageEmbeds: DiscordEmbed[] = [];
+  let embedFields: DiscordEmbedField[] = [];
+  let messageChars = 0;
+
+  const closeEmbed = () => {
+    if (embedFields.length > 0) {
+      messageEmbeds.push({ color: EMBED_COLOR, fields: embedFields });
+      embedFields = [];
+    }
+  };
+  const closeMessage = () => {
+    closeEmbed();
+    if (messageEmbeds.length > 0) {
+      messages.push(messageEmbeds);
+      messageEmbeds = [];
+      messageChars = 0;
+    }
+  };
+
+  for (const posting of newPostings) {
+    const field = postingToField(posting);
+    const fieldChars = field.name.length + field.value.length;
+
+    if (embedFields.length >= DISCORD_MAX_FIELDS_PER_EMBED) closeEmbed();
+    const needNewMessage =
+      messageChars + fieldChars > DISCORD_MESSAGE_CHAR_BUDGET ||
+      (embedFields.length === 0 && messageEmbeds.length >= DISCORD_MAX_EMBEDS_PER_MESSAGE);
+    if (needNewMessage) closeMessage();
+
+    embedFields.push(field);
+    messageChars += fieldChars;
+  }
+  closeMessage();
+
+  if (messages[0]?.[0]) {
+    messages[0][0].title = `📋 신규 공고 ${newPostings.length}건`;
   }
   return messages;
 }

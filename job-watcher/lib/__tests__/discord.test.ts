@@ -69,24 +69,79 @@ describe("formatDiscordEmbeds", () => {
     expect(messages[0][1].title).toBeUndefined();
   });
 
-  it("splits more than 250 postings (10 embeds worth) into multiple messages", () => {
+  it("splits a very large batch into multiple messages, respecting every Discord limit", () => {
     const postings = Array.from({ length: 260 }, (_, i) =>
       makePosting({ id: i, url: `https://jasoseol.com/recruit/${i}`, name: `회사${i}` }),
     );
 
     const messages = formatDiscordEmbeds(postings);
 
-    const totalEmbeds = messages.reduce((sum, m) => sum + m.length, 0);
     const totalFields = messages.reduce(
       (sum, m) => sum + m.reduce((s, e) => s + e.fields.length, 0),
       0,
     );
     expect(messages.length).toBeGreaterThan(1);
-    expect(totalEmbeds).toBe(11); // ceil(260 / 25)
-    expect(totalFields).toBe(260);
+    expect(totalFields).toBe(260); // no posting dropped
     for (const embeds of messages) {
       expect(embeds.length).toBeLessThanOrEqual(10);
+      for (const embed of embeds) {
+        expect(embed.fields.length).toBeLessThanOrEqual(25);
+      }
+      const totalChars = embeds.reduce(
+        (sum, embed) =>
+          sum +
+          embed.fields.reduce((s, f) => s + f.name.length + f.value.length, 0) +
+          (embed.title?.length ?? 0),
+        0,
+      );
+      expect(totalChars).toBeLessThan(6000);
     }
+  });
+
+  it("splits by total character budget, not just field count, once fields are realistically long", () => {
+    // Regression test for a real production failure (2026-09-22): 84 new
+    // postings with real saramin URLs/titles split purely by the 25-field
+    // count produced embeds whose combined character total (summed across
+    // every embed in the message) exceeded Discord's 6000-char-per-message
+    // limit, and Discord rejected the whole webhook call with HTTP 400.
+    // Each of these postings' field is long enough (~250+ chars) that 25 of
+    // them would blow well past 6000 if count were the only limit enforced.
+    const postings = Array.from({ length: 30 }, (_, i) =>
+      makePosting({
+        id: i,
+        url: `https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=${55000000 + i}&view_type=public-recruit`,
+        name: `주식회사 아주아주아주아주아주아주아주긴회사이름그룹${i}`,
+        title: `2026년 하반기 대졸 신입 및 경력사원 공개채용 - 백엔드/서버개발, 데이터엔지니어, 클라우드 인프라 직군 ${i}`,
+        fields: ["백엔드/서버개발", "데이터엔지니어", "클라우드", "DBA"],
+      }),
+    );
+
+    const messages = formatDiscordEmbeds(postings);
+
+    // No single embed reaches the 25-field cap -- the char budget bit first.
+    for (const embeds of messages) {
+      for (const embed of embeds) {
+        expect(embed.fields.length).toBeLessThan(25);
+      }
+    }
+    // The real Discord-enforced limit: total chars per MESSAGE (summed
+    // across every embed's every field in that message) stays under 6000.
+    for (const embeds of messages) {
+      const totalChars = embeds.reduce(
+        (sum, embed) =>
+          sum +
+          embed.fields.reduce((s, f) => s + f.name.length + f.value.length, 0) +
+          (embed.title?.length ?? 0),
+        0,
+      );
+      expect(totalChars).toBeLessThan(6000);
+    }
+    // No posting was dropped in the process.
+    const totalFields = messages.reduce(
+      (sum, embeds) => sum + embeds.reduce((s, e) => s + e.fields.length, 0),
+      0,
+    );
+    expect(totalFields).toBe(30);
   });
 
   it("takes the deadline date literally instead of converting through UTC", () => {
