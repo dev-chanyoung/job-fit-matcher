@@ -13,7 +13,7 @@ import type { Posting } from "./types.js";
 export const SEARCH_URL =
   "https://jasoseol.com/search?division=1%2C3%2C4" +
   "&businessTypes=big_business%2Cmiddle_market" +
-  "&dutyGroupIds=160%2C164%2C165%2C166%2C170%2C171%2C176%2C177%2C178" +
+  "&dutyGroupIds=160%2C164%2C165%2C166%2C170%2C171%2C176%2C177%2C178%2C179%2C180%2C181%2C182" +
   "&excludeClosed=true";
 
 const PER_PAGE = 100;
