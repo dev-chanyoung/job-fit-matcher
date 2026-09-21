@@ -13,9 +13,9 @@ import type { Posting } from "./types.js";
 // 사용자가 실제 고른 필터 그대로 사용 (신입, 대기업/중견기업 등, 수도권,
 // 백엔드/서버개발+데이터엔지니어+웹개발). 필터를 바꾸려면 이 상수만 교체.
 export const SEARCH_URL =
-  "https://www.saramin.co.kr/zf_user/jobs/public/list?exp_cd=1" +
-  "&company_cd=0%2C1%2C2%2C3%2C4%2C5%2C6%2C7%2C9%2C10" +
-  "&loc_mcd=101000%2C102000&cat_kewd=84%2C83%2C87" +
+  "https://www.saramin.co.kr/zf_user/jobs/public/list?loc_mcd=101000%2C102000" +
+  "&cat_kewd=84%2C83%2C87&exp_cd=1&company_type=scale001%2Cscale003%2Cscale002" +
+  "&company_cd=0%2C1%2C2%2C3%2C4%2C5%2C6%2C7%2C9%2C10&job_type=1%2C2%2C4" +
   "&panel_type=domestic&search_optional_item=y&search_done=y&panel_count=y&preview=y";
 
 // 이 필터 기준 페이지당 20건으로 확인됨(2026-09-22) -- 사이트가 고정폭이라
