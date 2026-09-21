@@ -135,6 +135,23 @@ class TestFetchAllPostings:
         assert len(result) == 2
         assert mock_get.call_count == 1
 
+    def test_fetch_failure_propagates_instead_of_being_swallowed(self, monkeypatch):
+        """Unlike extractor.fetch(), a fetch failure here must raise rather
+        than return None/empty -- a watcher run must not mistake "site
+        unreachable" for "no new postings today" (see _fetch_html's
+        docstring)."""
+        monkeypatch.setattr(
+            jasoseol_watcher.httpx,
+            "get",
+            MagicMock(side_effect=httpx.ConnectError("connection failed")),
+        )
+
+        try:
+            jasoseol_watcher.fetch_all_postings("https://jasoseol.com/search?x=1")
+            assert False, "expected httpx.ConnectError to propagate"
+        except httpx.ConnectError:
+            pass
+
     def test_paginates_when_total_exceeds_per_page(self, monkeypatch):
         page1 = [_make_posting(i) for i in range(1, 3)]
         page2 = [_make_posting(i) for i in range(3, 4)]
@@ -407,6 +424,30 @@ class TestRunCommand:
         saved = json.loads(state_path.read_text(encoding="utf-8"))
         assert jasoseol_watcher.posting_url(already_known) in saved
         assert jasoseol_watcher.posting_url(genuinely_new) in saved
+
+    def test_discord_send_failure_still_saves_state(self, tmp_path, monkeypatch):
+        """A failed Discord POST must not abort the run before the state
+        file is saved -- otherwise the same postings get re-diffed as "new"
+        and the same failure repeats forever on the next scheduled run."""
+        state_path = tmp_path / "seen.json"
+        state_path.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(jasoseol_watcher, "STATE_PATH", state_path)
+        new_posting = _make_posting(1, name="새회사")
+        self._patch_fetch(monkeypatch, [new_posting])
+        monkeypatch.setattr(
+            jasoseol_watcher.httpx,
+            "post",
+            MagicMock(side_effect=httpx.ConnectError("connection failed")),
+        )
+        monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/webhook")
+
+        result = runner.invoke(jasoseol_watcher.app, [])
+
+        assert result.exit_code == 0
+        assert "Discord 전송 실패" in result.output
+        assert "새회사" in result.output
+        saved = json.loads(state_path.read_text(encoding="utf-8"))
+        assert jasoseol_watcher.posting_url(new_posting) in saved
 
     def test_dry_run_does_not_write_state(self, tmp_path, monkeypatch):
         state_path = tmp_path / "seen.json"

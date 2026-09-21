@@ -175,7 +175,7 @@ def _format_deadline(posting: dict) -> str:
         return "미상"
     try:
         return datetime.fromisoformat(end_time).strftime("%Y-%m-%d")
-    except ValueError:
+    except (TypeError, ValueError):
         return "미상"
 
 
@@ -204,6 +204,11 @@ def format_discord_chunks(new_postings: list[dict]) -> list[str]:
     if current:
         chunks.append(current)
     return chunks
+
+
+def _echo_chunks(chunks: list[str]) -> None:
+    for chunk in chunks:
+        typer.echo(chunk)
 
 
 def send_discord_notification(chunks: list[str], webhook_url: str) -> None:
@@ -307,15 +312,21 @@ def run(
         chunks = format_discord_chunks(new_postings)
         webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
         if webhook_url:
-            send_discord_notification(chunks, webhook_url)
+            try:
+                send_discord_notification(chunks, webhook_url)
+            except httpx.HTTPError as exc:
+                # 전송 실패해도 상태 저장은 계속 진행한다 -- 그렇지 않으면 다음 실행에서
+                # 같은 공고를 또 "신규"로 판정해 같은 실패를 매일 반복하게 된다 (예:
+                # 웹훅 URL이 잘못됐거나 일시적 네트워크 오류인 경우). 이번 회차의 알림은
+                # 유실되지만, 콘솔에 남겨서 사람이 나중에라도 확인할 수 있게 한다.
+                typer.echo(f"Discord 전송 실패 -- {exc}. 콘솔에 출력만 합니다.")
+                _echo_chunks(chunks)
         else:
             typer.echo("DISCORD_WEBHOOK_URL 미설정 -- 콘솔에 출력만 합니다.")
-            for chunk in chunks:
-                typer.echo(chunk)
+            _echo_chunks(chunks)
     elif new_postings and dry_run:
         typer.echo("(--dry-run: Discord 전송 생략, 아래는 전송될 내용 미리보기)")
-        for chunk in format_discord_chunks(new_postings):
-            typer.echo(chunk)
+        _echo_chunks(format_discord_chunks(new_postings))
 
     if dry_run:
         typer.echo("(--dry-run: 상태 파일은 저장하지 않았습니다)")
