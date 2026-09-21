@@ -27,6 +27,14 @@ const USER_AGENT =
 const NEXT_DATA_RE =
   /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/;
 
+interface RawPosting {
+  id: number;
+  name: string;
+  title: string;
+  end_time: string | null;
+  employments?: { field?: string }[];
+}
+
 async function fetchHtml(url: string): Promise<string> {
   const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
   if (!res.ok) {
@@ -48,7 +56,7 @@ function parseNextData(html: string): unknown {
 }
 
 interface PostingsPayload {
-  data: Posting[];
+  data: RawPosting[];
   page: number;
   perPage: number;
   totalCount: number;
@@ -65,10 +73,28 @@ function extractPostings(nextData: unknown): PostingsPayload {
   return payload as PostingsPayload;
 }
 
+function normalize(raw: RawPosting): Posting {
+  const fields: string[] = [];
+  for (const employment of raw.employments ?? []) {
+    if (employment.field && !fields.includes(employment.field)) {
+      fields.push(employment.field);
+    }
+  }
+  return {
+    id: raw.id,
+    source: "jasoseol",
+    url: `https://jasoseol.com/recruit/${raw.id}`,
+    name: raw.name,
+    title: raw.title,
+    fields,
+    end_time: raw.end_time,
+  };
+}
+
 export async function fetchAllPostings(
   url: string = SEARCH_URL,
 ): Promise<Posting[]> {
-  const collected: Posting[] = [];
+  const collected: RawPosting[] = [];
   let page = 1;
   let totalCount: number | null = null;
 
@@ -84,22 +110,5 @@ export async function fetchAllPostings(
     page += 1;
   }
 
-  return collected;
-}
-
-// Canonical dedup key for a posting -- also its public URL.
-export function postingUrl(posting: Posting): string {
-  return `https://jasoseol.com/recruit/${posting.id}`;
-}
-
-// Deduplicated list of employments[*].field (e.g. ["품질", "DT"]), preserving
-// first-seen order.
-export function postingFields(posting: Posting): string[] {
-  const fields: string[] = [];
-  for (const employment of posting.employments ?? []) {
-    if (employment.field && !fields.includes(employment.field)) {
-      fields.push(employment.field);
-    }
-  }
-  return fields;
+  return collected.map(normalize);
 }

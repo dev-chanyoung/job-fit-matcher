@@ -5,10 +5,12 @@ import type { Posting } from "../types.js";
 function makePosting(overrides: Partial<Posting> = {}): Posting {
   return {
     id: 1,
+    source: "jasoseol",
+    url: "https://jasoseol.com/recruit/1",
     name: "테스트회사",
     title: "2026 신입사원 채용",
     end_time: "2026-10-11T23:59:00.000+09:00",
-    employments: [{ field: "백엔드" }],
+    fields: ["백엔드"],
     ...overrides,
   };
 }
@@ -23,7 +25,10 @@ describe("formatDiscordEmbeds", () => {
   });
 
   it("puts a short list in one message, one embed, with a clickable link field", () => {
-    const postings = [makePosting({ id: 1 }), makePosting({ id: 2, name: "다른회사" })];
+    const postings = [
+      makePosting({ id: 1, url: "https://jasoseol.com/recruit/1" }),
+      makePosting({ id: 2, url: "https://jasoseol.com/recruit/2", name: "다른회사" }),
+    ];
 
     const messages = formatDiscordEmbeds(postings);
 
@@ -37,9 +42,20 @@ describe("formatDiscordEmbeds", () => {
     expect(embed.fields[1].value).toContain("[🔗](https://jasoseol.com/recruit/2)");
   });
 
+  it("works the same way for postings from a different source (e.g. saramin)", () => {
+    const posting = makePosting({
+      source: "saramin",
+      url: "https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=1&view_type=public-recruit",
+    });
+
+    const [[embed]] = formatDiscordEmbeds([posting]);
+
+    expect(embed.fields[0].value).toContain("[🔗](https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=1&view_type=public-recruit)");
+  });
+
   it("splits more than 25 postings into multiple embeds within one message", () => {
     const postings = Array.from({ length: 40 }, (_, i) =>
-      makePosting({ id: i, name: `회사${i}` }),
+      makePosting({ id: i, url: `https://jasoseol.com/recruit/${i}`, name: `회사${i}` }),
     );
 
     const messages = formatDiscordEmbeds(postings);
@@ -55,7 +71,7 @@ describe("formatDiscordEmbeds", () => {
 
   it("splits more than 250 postings (10 embeds worth) into multiple messages", () => {
     const postings = Array.from({ length: 260 }, (_, i) =>
-      makePosting({ id: i, name: `회사${i}` }),
+      makePosting({ id: i, url: `https://jasoseol.com/recruit/${i}`, name: `회사${i}` }),
     );
 
     const messages = formatDiscordEmbeds(postings);
@@ -88,6 +104,14 @@ describe("formatDiscordEmbeds", () => {
     const [[embed]] = formatDiscordEmbeds([posting]);
 
     expect(embed.fields[0].value).toContain("마감 미상");
+  });
+
+  it("falls back to 직무 미상 when fields is empty", () => {
+    const posting = makePosting({ fields: [] });
+
+    const [[embed]] = formatDiscordEmbeds([posting]);
+
+    expect(embed.fields[0].value).toContain("직무 미상");
   });
 });
 

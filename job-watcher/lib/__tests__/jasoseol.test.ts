@@ -1,12 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  fetchAllPostings,
-  postingFields,
-  postingUrl,
-} from "../jasoseol.js";
-import type { Posting } from "../types.js";
+import { fetchAllPostings } from "../jasoseol.js";
 
-function makePosting(overrides: Partial<Posting> = {}): Posting {
+// jasoseol.com's raw API shape (pre-normalization) -- distinct from the
+// project's shared `Posting` type, which is what fetchAllPostings returns.
+function makeRawPosting(overrides: Record<string, unknown> = {}) {
   return {
     id: 1,
     name: "테스트회사",
@@ -18,7 +15,7 @@ function makePosting(overrides: Partial<Posting> = {}): Posting {
 }
 
 function nextDataHtml(
-  postings: Posting[],
+  postings: ReturnType<typeof makeRawPosting>[],
   opts: { totalCount?: number; page?: number; perPage?: number } = {},
 ): string {
   const payload = {
@@ -58,24 +55,41 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("postingUrl / postingFields", () => {
-  it("builds the canonical recruit URL", () => {
-    expect(postingUrl(makePosting({ id: 106384 }))).toBe(
-      "https://jasoseol.com/recruit/106384",
-    );
-  });
-
-  it("dedupes employment fields preserving order", () => {
-    const posting = makePosting({
-      employments: [{ field: "품질" }, { field: "DT" }, { field: "품질" }],
-    });
-    expect(postingFields(posting)).toEqual(["품질", "DT"]);
-  });
-});
-
 describe("fetchAllPostings", () => {
+  it("normalizes id/name/title/end_time and builds the canonical URL", async () => {
+    const fetchMock = fakeFetch(
+      nextDataHtml([makeRawPosting({ id: 106384 })], { totalCount: 1 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [posting] = await fetchAllPostings("https://jasoseol.com/search?x=1");
+
+    expect(posting.id).toBe(106384);
+    expect(posting.source).toBe("jasoseol");
+    expect(posting.url).toBe("https://jasoseol.com/recruit/106384");
+    expect(posting.name).toBe("테스트회사");
+  });
+
+  it("dedupes employment fields preserving order", async () => {
+    const fetchMock = fakeFetch(
+      nextDataHtml(
+        [
+          makeRawPosting({
+            employments: [{ field: "품질" }, { field: "DT" }, { field: "품질" }],
+          }),
+        ],
+        { totalCount: 1 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [posting] = await fetchAllPostings("https://jasoseol.com/search?x=1");
+
+    expect(posting.fields).toEqual(["품질", "DT"]);
+  });
+
   it("returns all postings when they fit in one page", async () => {
-    const postings = [makePosting({ id: 1 }), makePosting({ id: 2 })];
+    const postings = [makeRawPosting({ id: 1 }), makeRawPosting({ id: 2 })];
     const fetchMock = fakeFetch(nextDataHtml(postings, { totalCount: 2 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -86,12 +100,12 @@ describe("fetchAllPostings", () => {
   });
 
   it("paginates when totalCount exceeds perPage", async () => {
-    const page1 = nextDataHtml([makePosting({ id: 1 }), makePosting({ id: 2 })], {
+    const page1 = nextDataHtml([makeRawPosting({ id: 1 }), makeRawPosting({ id: 2 })], {
       totalCount: 3,
       page: 1,
       perPage: 2,
     });
-    const page2 = nextDataHtml([makePosting({ id: 3 })], {
+    const page2 = nextDataHtml([makeRawPosting({ id: 3 })], {
       totalCount: 3,
       page: 2,
       perPage: 2,

@@ -1,4 +1,3 @@
-import { postingFields, postingUrl } from "./jasoseol.js";
 import type { Posting } from "./types.js";
 
 // Discord's plain message "content" does NOT render [text](url) markdown
@@ -33,12 +32,12 @@ function formatDeadline(posting: Posting): string {
 }
 
 function postingToField(posting: Posting): DiscordEmbedField {
-  const fields = postingFields(posting).join(", ") || "직무 미상";
+  const fields = posting.fields.join(", ") || "직무 미상";
   return {
-    name: `🏢 ${posting.name ?? "?"}`,
+    name: `🏢 ${posting.name || "?"}`,
     value:
-      `**${posting.title ?? "?"}**\n` +
-      `${fields} · 📅 마감 ${formatDeadline(posting)} · [🔗](${postingUrl(posting)})`,
+      `**${posting.title || "?"}**\n` +
+      `${fields} · 📅 마감 ${formatDeadline(posting)} · [🔗](${posting.url})`,
   };
 }
 
@@ -60,7 +59,7 @@ export function formatDiscordEmbeds(newPostings: Posting[]): DiscordEmbed[][] {
       fields: slice.map(postingToField),
     });
   }
-  embeds[0].title = `📋 자소설닷컴 신규 공고 ${newPostings.length}건`;
+  embeds[0].title = `📋 신규 공고 ${newPostings.length}건`;
 
   const messages: DiscordEmbed[][] = [];
   for (let i = 0; i < embeds.length; i += DISCORD_MAX_EMBEDS_PER_MESSAGE) {

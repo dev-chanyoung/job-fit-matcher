@@ -1,23 +1,23 @@
-// A single jasoseol.com posting, as returned inside the __NEXT_DATA__ payload.
-// Only the fields this project actually reads are typed -- the real API
-// response has many more (favorite_count, view_count, etc.) that we ignore.
+// A job posting, normalized to the same shape regardless of which site it
+// came from. Each site module (lib/jasoseol.ts, lib/saramin.ts) is
+// responsible for mapping its own raw response into this shape -- nothing
+// downstream (discord.ts, mongo.ts, api/check-postings.ts) needs to know
+// which site a posting came from.
 export interface Posting {
   id: number;
+  source: "jasoseol" | "saramin";
+  url: string;
   name: string;
   title: string;
+  // Duty/job-category tags, already deduplicated, in site-display order.
+  fields: string[];
+  // "YYYY-MM-DD" (or a full ISO string -- only the first 10 chars are ever
+  // read) or null when the site gives no usable deadline.
   end_time: string | null;
-  start_time?: string | null;
-  employments?: Employment[];
-}
-
-export interface Employment {
-  field?: string;
-  duty_group_ids?: number[];
 }
 
 // One entry in the "seen postings" MongoDB collection, keyed by posting URL
-// (_id). Mirrors the JSON schema the original local Python version used, so
-// the reasoning docs from that version still apply here.
+// (_id).
 export interface SeenEntry {
   first_seen: string;
   company: string;
