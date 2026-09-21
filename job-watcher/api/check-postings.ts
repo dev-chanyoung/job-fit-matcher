@@ -5,7 +5,7 @@
 // separately (same split as job-judge/jasoseol_watcher.py, the local
 // prototype this was ported from).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { formatDiscordChunks, sendDiscordNotification } from "../lib/discord.js";
+import { formatDiscordEmbeds, sendDiscordNotification } from "../lib/discord.js";
 import { fetchAllPostings, postingUrl, SEARCH_URL } from "../lib/jasoseol.js";
 import { loadSeenUrls, upsertSeenEntries } from "../lib/mongo.js";
 import { companyAlreadyTracked, seedFromNotion } from "../lib/notion.js";
@@ -67,7 +67,7 @@ export default async function handler(
       const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
       if (webhookUrl) {
         try {
-          await sendDiscordNotification(formatDiscordChunks(newPostings), webhookUrl);
+          await sendDiscordNotification(formatDiscordEmbeds(newPostings), webhookUrl);
           discordStatus = "sent";
         } catch (err) {
           // 전송 실패해도 상태 저장은 계속 진행한다 -- 그렇지 않으면 다음 실행에서
