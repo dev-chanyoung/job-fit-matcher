@@ -12,7 +12,7 @@
 // as "the same opportunity" -- each site's posting is tracked and notified
 // independently until that's specifically asked for.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { formatDiscordEmbeds, sendDiscordNotification } from "../lib/discord.js";
+import { notifyBySource } from "../lib/discord.js";
 import * as jasoseol from "../lib/jasoseol.js";
 import { loadSeenUrls, upsertSeenEntries } from "../lib/mongo.js";
 import { companyAlreadyTracked, seedFromNotion } from "../lib/notion.js";
@@ -102,19 +102,12 @@ export default async function handler(
       }
     }
 
-    let discordStatus: "sent" | "skipped" | "no-webhook-configured" | `failed: ${string}` =
+    let discordStatus: Record<string, string> | "skipped" | "no-webhook-configured" =
       "skipped";
     if (newPostings.length > 0) {
       const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
       if (webhookUrl) {
-        try {
-          await sendDiscordNotification(formatDiscordEmbeds(newPostings), webhookUrl);
-          discordStatus = "sent";
-        } catch (err) {
-          // 전송 실패해도 상태 저장은 계속 진행한다 -- 그렇지 않으면 다음 실행에서
-          // 같은 공고를 또 "신규"로 판정해 같은 실패를 매일 반복하게 된다.
-          discordStatus = `failed: ${(err as Error).message}`;
-        }
+        discordStatus = await notifyBySource(newPostings, webhookUrl);
       } else {
         discordStatus = "no-webhook-configured";
       }

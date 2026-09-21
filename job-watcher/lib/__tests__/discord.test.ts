@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatDiscordEmbeds, sendDiscordNotification } from "../discord.js";
+import { formatDiscordEmbeds, notifyBySource, sendDiscordNotification } from "../discord.js";
 import type { Posting } from "../types.js";
 
 function makePosting(overrides: Partial<Posting> = {}): Posting {
@@ -19,23 +19,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const TEST_TITLE = "📋 테스트 신규 공고 N건";
+
 describe("formatDiscordEmbeds", () => {
   it("returns nothing for an empty list", () => {
-    expect(formatDiscordEmbeds([])).toEqual([]);
+    expect(formatDiscordEmbeds([], TEST_TITLE)).toEqual([]);
   });
 
-  it("puts a short list in one message, one embed, with a clickable link field", () => {
+  it("puts a short list in one message, one embed, with the given title and a clickable link field", () => {
     const postings = [
       makePosting({ id: 1, url: "https://jasoseol.com/recruit/1" }),
       makePosting({ id: 2, url: "https://jasoseol.com/recruit/2", name: "다른회사" }),
     ];
 
-    const messages = formatDiscordEmbeds(postings);
+    const messages = formatDiscordEmbeds(postings, TEST_TITLE);
 
     expect(messages).toHaveLength(1);
     expect(messages[0]).toHaveLength(1);
     const embed = messages[0][0];
-    expect(embed.title).toContain("2건");
+    expect(embed.title).toBe(TEST_TITLE);
     expect(embed.fields).toHaveLength(2);
     expect(embed.fields[0].name).toContain("테스트회사");
     expect(embed.fields[0].value).toContain("[🔗](https://jasoseol.com/recruit/1)");
@@ -48,7 +50,7 @@ describe("formatDiscordEmbeds", () => {
       url: "https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=1&view_type=public-recruit",
     });
 
-    const [[embed]] = formatDiscordEmbeds([posting]);
+    const [[embed]] = formatDiscordEmbeds([posting], TEST_TITLE);
 
     expect(embed.fields[0].value).toContain("[🔗](https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=1&view_type=public-recruit)");
   });
@@ -58,14 +60,14 @@ describe("formatDiscordEmbeds", () => {
       makePosting({ id: i, url: `https://jasoseol.com/recruit/${i}`, name: `회사${i}` }),
     );
 
-    const messages = formatDiscordEmbeds(postings);
+    const messages = formatDiscordEmbeds(postings, TEST_TITLE);
 
     expect(messages).toHaveLength(1);
     expect(messages[0]).toHaveLength(2); // 25 + 15
     expect(messages[0][0].fields).toHaveLength(25);
     expect(messages[0][1].fields).toHaveLength(15);
     // Title only goes on the first embed of the batch.
-    expect(messages[0][0].title).toContain("40건");
+    expect(messages[0][0].title).toBe(TEST_TITLE);
     expect(messages[0][1].title).toBeUndefined();
   });
 
@@ -74,7 +76,7 @@ describe("formatDiscordEmbeds", () => {
       makePosting({ id: i, url: `https://jasoseol.com/recruit/${i}`, name: `회사${i}` }),
     );
 
-    const messages = formatDiscordEmbeds(postings);
+    const messages = formatDiscordEmbeds(postings, TEST_TITLE);
 
     const totalFields = messages.reduce(
       (sum, m) => sum + m.reduce((s, e) => s + e.fields.length, 0),
@@ -116,7 +118,7 @@ describe("formatDiscordEmbeds", () => {
       }),
     );
 
-    const messages = formatDiscordEmbeds(postings);
+    const messages = formatDiscordEmbeds(postings, TEST_TITLE);
 
     // No single embed reaches the 25-field cap -- the char budget bit first.
     for (const embeds of messages) {
@@ -148,7 +150,7 @@ describe("formatDiscordEmbeds", () => {
     // 00:30 KST -- naive UTC conversion would show the previous day.
     const posting = makePosting({ end_time: "2026-10-12T00:30:00.000+09:00" });
 
-    const [[embed]] = formatDiscordEmbeds([posting]);
+    const [[embed]] = formatDiscordEmbeds([posting], TEST_TITLE);
 
     expect(embed.fields[0].value).toContain("마감 2026-10-12");
   });
@@ -156,7 +158,7 @@ describe("formatDiscordEmbeds", () => {
   it("falls back to 미상 when end_time is missing", () => {
     const posting = makePosting({ end_time: null });
 
-    const [[embed]] = formatDiscordEmbeds([posting]);
+    const [[embed]] = formatDiscordEmbeds([posting], TEST_TITLE);
 
     expect(embed.fields[0].value).toContain("마감 미상");
   });
@@ -164,7 +166,7 @@ describe("formatDiscordEmbeds", () => {
   it("falls back to 직무 미상 when fields is empty", () => {
     const posting = makePosting({ fields: [] });
 
-    const [[embed]] = formatDiscordEmbeds([posting]);
+    const [[embed]] = formatDiscordEmbeds([posting], TEST_TITLE);
 
     expect(embed.fields[0].value).toContain("직무 미상");
   });
@@ -174,7 +176,7 @@ describe("sendDiscordNotification", () => {
   it("posts one webhook request per message, with an embeds array", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal("fetch", fetchMock);
-    const messages = formatDiscordEmbeds([makePosting()]);
+    const messages = formatDiscordEmbeds([makePosting()], TEST_TITLE);
 
     await sendDiscordNotification(messages, "https://discord.example/webhook");
 
@@ -188,10 +190,67 @@ describe("sendDiscordNotification", () => {
 
   it("throws when Discord responds with a non-2xx status", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 400 }));
-    const messages = formatDiscordEmbeds([makePosting()]);
+    const messages = formatDiscordEmbeds([makePosting()], TEST_TITLE);
 
     await expect(
       sendDiscordNotification(messages, "https://discord.example/webhook"),
     ).rejects.toThrow(/HTTP 400/);
+  });
+});
+
+describe("notifyBySource", () => {
+  it("sends one webhook message per source, each titled with its own site label and count", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    const postings = [
+      makePosting({ id: 1, source: "jasoseol", url: "https://jasoseol.com/recruit/1" }),
+      makePosting({ id: 2, source: "jasoseol", url: "https://jasoseol.com/recruit/2" }),
+      makePosting({
+        id: 3,
+        source: "saramin",
+        url: "https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=3&view_type=public-recruit",
+      }),
+    ];
+
+    const statuses = await notifyBySource(postings, "https://discord.example/webhook");
+
+    expect(statuses).toEqual({ jasoseol: "sent", saramin: "sent" });
+    expect(fetchMock).toHaveBeenCalledTimes(2); // one POST per source, not per posting
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      JSON.parse((init as RequestInit).body as string),
+    );
+    const jasoseolBody = bodies.find((b) => b.embeds[0].title.includes("자소설닷컴"));
+    const saraminBody = bodies.find((b) => b.embeds[0].title.includes("사람인"));
+    expect(jasoseolBody.embeds[0].title).toBe("📋 자소설닷컴 신규 공고 2건");
+    expect(jasoseolBody.embeds[0].fields).toHaveLength(2);
+    expect(saraminBody.embeds[0].title).toBe("📋 사람인 신규 공고 1건");
+    expect(saraminBody.embeds[0].fields).toHaveLength(1);
+  });
+
+  it("keeps trying the other source when one source's send fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation((url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        if (body.embeds[0].title.includes("자소설닷컴")) {
+          return Promise.resolve({ ok: false, status: 400 });
+        }
+        return Promise.resolve({ ok: true, status: 200 });
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const postings = [
+      makePosting({ id: 1, source: "jasoseol", url: "https://jasoseol.com/recruit/1" }),
+      makePosting({
+        id: 2,
+        source: "saramin",
+        url: "https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=2&view_type=public-recruit",
+      }),
+    ];
+
+    const statuses = await notifyBySource(postings, "https://discord.example/webhook");
+
+    expect(statuses.jasoseol).toMatch(/^failed: /);
+    expect(statuses.saramin).toBe("sent");
+    expect(fetchMock).toHaveBeenCalledTimes(2); // saramin attempted even though jasoseol failed
   });
 });

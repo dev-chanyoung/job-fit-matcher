@@ -58,7 +58,7 @@ function postingToField(posting: Posting): DiscordEmbedField {
 // this is usually one message with a couple of embeds; the grouping exists
 // so a much larger day degrades safely instead of Discord rejecting the
 // whole webhook call.
-export function formatDiscordEmbeds(newPostings: Posting[]): DiscordEmbed[][] {
+export function formatDiscordEmbeds(newPostings: Posting[], title: string): DiscordEmbed[][] {
   if (newPostings.length === 0) return [];
 
   const messages: DiscordEmbed[][] = [];
@@ -97,7 +97,7 @@ export function formatDiscordEmbeds(newPostings: Posting[]): DiscordEmbed[][] {
   closeMessage();
 
   if (messages[0]?.[0]) {
-    messages[0][0].title = `📋 신규 공고 ${newPostings.length}건`;
+    messages[0][0].title = title;
   }
   return messages;
 }
@@ -116,4 +116,39 @@ export async function sendDiscordNotification(
       throw new Error(`Discord webhook failed: HTTP ${res.status}`);
     }
   }
+}
+
+const SOURCE_LABELS: Record<Posting["source"], string> = {
+  jasoseol: "자소설닷컴",
+  saramin: "사람인",
+};
+
+// 사이트별로 별도 Discord 메시지를 보낸다 (2026-09-22 사용자 요청 -- 어느
+// 사이트에서 온 공고인지 한눈에 구분하고 싶다고 해서). 한 사이트 전송이
+// 실패해도 다른 사이트 전송은 계속 시도하고, 실패는 소스별로 따로 기록한다.
+export async function notifyBySource(
+  newPostings: Posting[],
+  webhookUrl: string,
+): Promise<Record<string, string>> {
+  const bySource = new Map<Posting["source"], Posting[]>();
+  for (const posting of newPostings) {
+    const group = bySource.get(posting.source) ?? [];
+    group.push(posting);
+    bySource.set(posting.source, group);
+  }
+
+  const statuses: Record<string, string> = {};
+  for (const [source, postings] of bySource) {
+    const label = SOURCE_LABELS[source] ?? source;
+    const title = `📋 ${label} 신규 공고 ${postings.length}건`;
+    try {
+      await sendDiscordNotification(formatDiscordEmbeds(postings, title), webhookUrl);
+      statuses[source] = "sent";
+    } catch (err) {
+      // 전송 실패해도 상태 저장은 계속 진행한다 (호출부 책임) -- 그렇지 않으면
+      // 다음 실행에서 같은 공고를 또 "신규"로 판정해 같은 실패를 매일 반복한다.
+      statuses[source] = `failed: ${(err as Error).message}`;
+    }
+  }
+  return statuses;
 }
