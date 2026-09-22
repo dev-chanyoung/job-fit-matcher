@@ -103,6 +103,52 @@ def test_record_marks_classified_and_posts_to_discord(tmp_path, monkeypatch):
     assert "sent" in result.output
 
 
+def test_dedupe_cross_source_prefers_jasoseol():
+    results = [
+        {"url": "https://jasoseol.com/x", "company": "G유통그룹", "title": "채용", "source": "jasoseol", "tier": "적합", "reason": "r"},
+        {"url": "https://www.saramin.co.kr/y", "company": "(주)G유통", "title": "채용", "source": "saramin", "tier": "적합", "reason": "r"},
+        {"url": "https://www.saramin.co.kr/z", "company": "K중공업(주)", "title": "채용", "source": "saramin", "tier": "적합", "reason": "r"},
+    ]
+
+    kept = batch_classify._dedupe_cross_source(results)
+
+    kept_urls = {item["url"] for item in kept}
+    assert kept_urls == {"https://jasoseol.com/x", "https://www.saramin.co.kr/z"}
+
+
+def test_dedupe_cross_source_keeps_multiple_postings_from_same_source():
+    results = [
+        {"url": "https://jasoseol.com/a", "company": "D식품", "title": "백엔드", "source": "jasoseol", "tier": "적합", "reason": "r"},
+        {"url": "https://jasoseol.com/b", "company": "D식품", "title": "데이터", "source": "jasoseol", "tier": "적합", "reason": "r"},
+    ]
+
+    kept = batch_classify._dedupe_cross_source(results)
+
+    assert len(kept) == 2
+
+
+def test_record_excludes_cross_source_duplicates_from_discord_only(tmp_path, monkeypatch):
+    results = [
+        {"url": "https://jasoseol.com/x", "company": "G유통그룹", "title": "채용", "source": "jasoseol", "tier": "적합", "reason": "r"},
+        {"url": "https://www.saramin.co.kr/y", "company": "(주)G유통", "title": "채용", "source": "saramin", "tier": "적합", "reason": "r"},
+    ]
+    results_path = _write_json(tmp_path, "results.json", results)
+    mark_calls = []
+    post_calls = []
+    monkeypatch.setattr(batch_classify.mongo_reader, "mark_classified", lambda **k: mark_calls.append(k))
+    monkeypatch.setattr(batch_classify.discord_poster, "post_classified_results", lambda results: post_calls.append(results) or {"적합": "sent"})
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.test/webhook")
+
+    result = runner.invoke(batch_classify.app, ["record", str(results_path)])
+
+    assert result.exit_code == 0
+    # Both get marked classified in MongoDB regardless of the dedup applied to Discord.
+    assert len(mark_calls) == 2
+    # Only the jasoseol entry goes to Discord.
+    assert len(post_calls) == 1
+    assert [item["url"] for item in post_calls[0]] == ["https://jasoseol.com/x"]
+
+
 def test_record_skips_discord_when_webhook_unset(tmp_path, monkeypatch):
     results_path = _write_json(tmp_path, "results.json", _RESULTS)
     monkeypatch.setattr(batch_classify.mongo_reader, "mark_classified", lambda **k: None)

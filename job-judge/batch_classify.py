@@ -33,6 +33,7 @@ title/source/tier/reason. tier must be one of mongo_reader.VALID_TIERS.
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -46,6 +47,52 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8")
 
 app = typer.Typer()
+
+# 소스 간 중복 회사 제거 시 남길 소스의 우선순위 (2026-09-22 사용자 요청: 자소설닷컴 우선).
+# 숫자가 작을수록 우선.
+_SOURCE_PRIORITY = {"jasoseol": 0, "saramin": 1}
+_CORP_DESIGNATOR_RE = re.compile(r"\(주\)|㈜|주식회사|그룹|\s+")
+
+
+def _normalize_company(name: str) -> str:
+    """Loosely normalize a company name for cross-source duplicate matching
+    -- strips common Korean corporate designators ((주)/㈜/주식회사), the
+    "그룹" (group) suffix some group-wide 공채 postings use in place of the
+    legal entity name (e.g. "G유통그룹" vs "(주)G유통"), and whitespace.
+    This is a heuristic, not an exact registry match: it can miss real
+    duplicates with unusual naming, or in principle over-merge two
+    genuinely different companies that happen to normalize the same way --
+    acceptable here since a human always reviews the Discord output before
+    acting on it."""
+    return _CORP_DESIGNATOR_RE.sub("", name)
+
+
+def _dedupe_cross_source(results: list[dict]) -> list[dict]:
+    """Drop an item when a higher-priority source (jasoseol over saramin)
+    already has an item for the same normalized company, so the same
+    company's posting is never recommended from more than one source.
+    Items are never dropped for duplicating another item from their OWN
+    source -- a single source can legitimately list multiple distinct
+    postings for one company."""
+    companies_by_source: dict[str, set[str]] = {}
+    for item in results:
+        key = _normalize_company(item.get("company") or "")
+        if key:
+            companies_by_source.setdefault(item["source"], set()).add(key)
+
+    kept = []
+    for item in results:
+        key = _normalize_company(item.get("company") or "")
+        source = item["source"]
+        outranked = key and any(
+            key in companies
+            for other_source, companies in companies_by_source.items()
+            if other_source != source
+            and _SOURCE_PRIORITY.get(other_source, 99) < _SOURCE_PRIORITY.get(source, 99)
+        )
+        if not outranked:
+            kept.append(item)
+    return kept
 
 
 def _format_candidates_report(items: list[dict]) -> str:
@@ -129,7 +176,12 @@ def record(results_json: Path = typer.Argument(..., help="{url,company,title,sou
         typer.echo("DISCORD_WEBHOOK_URL 미설정 -- Discord 전송은 건너뜀.")
         raise typer.Exit(code=0)
 
-    statuses = discord_poster.post_classified_results(results)
+    deduped = _dedupe_cross_source(results)
+    dropped = len(results) - len(deduped)
+    if dropped:
+        typer.echo(f"소스 간 중복 {dropped}건은 자소설닷컴 우선으로 Discord 전송에서 제외 (MongoDB 기록은 그대로 유지).")
+
+    statuses = discord_poster.post_classified_results(deduped)
     typer.echo(f"Discord 전송 결과: {statuses}")
 
 
