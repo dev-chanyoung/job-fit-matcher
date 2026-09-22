@@ -211,10 +211,13 @@
   `[{"url","company","title","source","tier","reason"}, ...]` JSON으로 모아
   `python batch_classify.py record <results.json>`을 **한 번만** 실행한다 — 이 명령이
   `mongo_reader.mark_classified()`로 MongoDB에 기록해서 같은 공고가 다음 세션에 다시 후보로 뜨지
-  않게 하고, 동시에 `discord_poster.post_classified_results()`로 출처별(자소설닷컴 1번대/사람인
-  2번대)·등급별("1-1. 자소설닷컴 ✅ 적합 (N건)" 형식) Discord 메시지를 보낸다. `source`는
-  `mongo_reader.source_from_url()`이 URL 도메인으로 이미 판단해서 후보 목록에 넣어주므로 그대로
-  쓰면 된다.
+  않게 하고, 동시에 `discord_poster.post_classified_results()`로 Discord 메시지를 보낸다.
+  **전송 순서/단위 (2026-09-22 사용자 요청)**: 임베딩을 최대 용량까지 채워서 보내지 않고, 등급
+  단위로 항상 적합 → 애매 → 부적합 순서로 개별 메시지를 보낸다 — 같은 등급 안에서는 자소설닷컴/
+  사람인 항목이 한 메시지 안에 서로 다른 임베드("✅ 자소설닷컴 적합 (N건)", "✅ 사람인 적합 (M건)"
+  형식)로 함께 나가고, 등급이 바뀔 때만 새 메시지가 시작된다(한 등급이 너무 커서 글자수/필드수
+  한도를 넘으면 그 등급 안에서만 메시지가 추가로 나뉜다). `source`는 `mongo_reader.source_from_url()`
+  이 URL 도메인으로 이미 판단해서 후보 목록에 넣어주므로 그대로 쓰면 된다.
 - **Notion과는 무관**: 이 워크플로는 Notion을 전혀 건드리지 않는다. "적합"으로 뜬 공고를 실제로
   지원 검토하고 싶으면, 그 URL을 다시 평소처럼 세션에 붙여넣어서 `judge_manual.py`의 정식
   하드필터+평가 흐름을 별도로 돌린다.

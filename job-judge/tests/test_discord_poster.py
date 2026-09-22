@@ -22,7 +22,7 @@ def _item(url, company, title, source, tier, reason):
     return {"url": url, "company": company, "title": title, "source": source, "tier": tier, "reason": reason}
 
 
-def test_groups_by_source_then_tier(monkeypatch):
+def test_groups_by_tier_then_source(monkeypatch):
     sent_payloads = []
 
     def fake_post(url, json, timeout=10):
@@ -39,27 +39,24 @@ def test_groups_by_source_then_tier(monkeypatch):
 
     statuses = discord_poster.post_classified_results(results, webhook_url="https://discord.test/webhook")
 
-    assert statuses == {"jasoseol": "sent", "saramin": "sent"}
+    assert statuses == {"적합": "sent", "부적합": "sent", "애매": "sent"}
     # Tiers are never combined into one message (2026-09-22: a live run
     # combining 3 tier-embeds into one message got a reproducible HTTP 500) --
-    # jasoseol's 적합 and 부적합 go out as two separate messages, saramin's
-    # 애매 as a third.
+    # 적합/애매/부적합 each go out as their own separate message, in that
+    # order, regardless of which source each item came from.
     assert len(sent_payloads) == 3
     for _, body in sent_payloads:
         assert len(body["embeds"]) == 1
 
-    # tier_idx reflects the tier's fixed canonical position (적합=1/애매=2/
-    # 부적합=3), not a compacted sequence -- so skipping 애매 here still
-    # produces "1-3." for 부적합, not "1-2.".
-    jasoseol_url, jasoseol_body_1 = sent_payloads[0]
-    assert jasoseol_url == "https://discord.test/webhook"
-    assert jasoseol_body_1["embeds"][0]["title"] == "1-1. 자소설닷컴 ✅ 적합 (1건)"
+    fit_url, fit_body = sent_payloads[0]
+    assert fit_url == "https://discord.test/webhook"
+    assert fit_body["embeds"][0]["title"] == "✅ 자소설닷컴 적합 (1건)"
 
-    _, jasoseol_body_2 = sent_payloads[1]
-    assert jasoseol_body_2["embeds"][0]["title"] == "1-3. 자소설닷컴 ❌ 부적합 (1건)"
+    _, ambiguous_body = sent_payloads[1]
+    assert ambiguous_body["embeds"][0]["title"] == "🤔 사람인 애매 (1건)"
 
-    _, saramin_body = sent_payloads[2]
-    assert saramin_body["embeds"][0]["title"] == "2-2. 사람인 🤔 애매 (1건)"
+    _, unfit_body = sent_payloads[2]
+    assert unfit_body["embeds"][0]["title"] == "❌ 자소설닷컴 부적합 (1건)"
 
 
 def test_missing_tier_group_is_skipped_not_empty_embed(monkeypatch):
@@ -75,10 +72,15 @@ def test_missing_tier_group_is_skipped_not_empty_embed(monkeypatch):
 
     _, body = sent_payloads[0]
     assert len(body["embeds"]) == 1
-    assert body["embeds"][0]["title"] == "1-1. 자소설닷컴 ✅ 적합 (1건)"
+    assert body["embeds"][0]["title"] == "✅ 자소설닷컴 적합 (1건)"
 
 
-def test_one_source_failure_does_not_block_the_other(monkeypatch):
+def test_one_tier_failure_does_not_block_another_tier(monkeypatch):
+    """Sources within the same tier now share one message (see module
+    docstring), so failure isolation moved from source-granularity to
+    tier-granularity: a bad send for 적합 must not stop 부적합 from going
+    out."""
+
     def fake_post(url, json, timeout=10):
         embed_text = json["embeds"][0]["fields"][0]["name"]
         if "fail" in embed_text:
@@ -89,13 +91,13 @@ def test_one_source_failure_does_not_block_the_other(monkeypatch):
 
     results = [
         _item("https://jasoseol.com/a", "fail사", "백엔드", "jasoseol", "적합", "일치"),
-        _item("https://www.saramin.co.kr/b", "B사", "서버", "saramin", "적합", "일치"),
+        _item("https://www.saramin.co.kr/b", "B사", "서버", "saramin", "부적합", "무관"),
     ]
 
     statuses = discord_poster.post_classified_results(results, webhook_url="https://discord.test/webhook")
 
-    assert statuses["jasoseol"].startswith("failed:")
-    assert statuses["saramin"] == "sent"
+    assert statuses["적합"].startswith("failed:")
+    assert statuses["부적합"] == "sent"
 
 
 def test_missing_webhook_url_raises(monkeypatch):
@@ -131,8 +133,39 @@ def test_tiers_are_sent_in_fit_ambiguous_unfit_order(monkeypatch):
 
     discord_poster.post_classified_results(results, webhook_url="https://discord.test/webhook")
 
-    sent_tiers = [body["embeds"][0]["title"].split(" ", 1)[0] for _, body in sent_payloads]
-    assert sent_tiers == ["1-1.", "1-2.", "1-3."]
+    sent_titles = [body["embeds"][0]["title"] for _, body in sent_payloads]
+    assert sent_titles == [
+        "✅ 자소설닷컴 적합 (1건)",
+        "🤔 자소설닷컴 애매 (1건)",
+        "❌ 자소설닷컴 부적합 (1건)",
+    ]
+
+
+def test_same_tier_different_sources_share_one_message(monkeypatch):
+    """2026-09-22 사용자 요청: 등급마다 개별 전송하되 임베딩을 최대 용량까지 채워
+    보내지 말 것 -- 같은 tier의 자소설닷컴/사람인 항목은 한 메시지 안에 서로 다른
+    임베드로 함께 나가고(별도 tier로 쪼개지 않음), 오직 tier가 바뀔 때만 새 메시지가
+    시작된다."""
+    sent_payloads = []
+    monkeypatch.setattr(
+        discord_poster.httpx,
+        "post",
+        lambda url, json, timeout=10: sent_payloads.append((url, json)) or _FakeResponse(204),
+    )
+
+    results = [
+        _item("https://jasoseol.com/a", "A사", "백엔드", "jasoseol", "적합", "일치"),
+        _item("https://www.saramin.co.kr/b", "B사", "서버", "saramin", "적합", "일치"),
+    ]
+
+    discord_poster.post_classified_results(results, webhook_url="https://discord.test/webhook")
+
+    assert len(sent_payloads) == 1
+    _, body = sent_payloads[0]
+    assert [e["title"] for e in body["embeds"]] == [
+        "✅ 자소설닷컴 적합 (1건)",
+        "✅ 사람인 적합 (1건)",
+    ]
 
 
 def test_tiers_are_never_combined_into_one_message_even_when_small(monkeypatch):
