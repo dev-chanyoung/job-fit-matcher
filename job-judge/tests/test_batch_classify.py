@@ -149,6 +149,56 @@ def test_record_excludes_cross_source_duplicates_from_discord_only(tmp_path, mon
     assert [item["url"] for item in post_calls[0]] == ["https://jasoseol.com/x"]
 
 
+def test_dedupe_against_notion_drops_already_tracked_companies(monkeypatch):
+    monkeypatch.setattr(
+        batch_classify.notion_writer,
+        "fetch_existing_companies",
+        lambda: ["H그룹 (제조계열사)", "I항공"],
+    )
+    results = [
+        {"url": "https://jasoseol.com/a", "company": "H그룹", "title": "채용", "source": "jasoseol", "tier": "적합", "reason": "r"},
+        {"url": "https://jasoseol.com/b", "company": "I항공", "title": "채용", "source": "jasoseol", "tier": "적합", "reason": "r"},
+        {"url": "https://jasoseol.com/c", "company": "D푸드", "title": "채용", "source": "jasoseol", "tier": "적합", "reason": "r"},
+    ]
+
+    kept = batch_classify._dedupe_against_notion(results)
+
+    assert [item["company"] for item in kept] == ["D푸드"]
+
+
+def test_dedupe_against_notion_is_best_effort_on_lookup_failure(monkeypatch):
+    def _raise():
+        raise RuntimeError("NOTION_API_KEY missing")
+
+    monkeypatch.setattr(batch_classify.notion_writer, "fetch_existing_companies", _raise)
+    results = [{"url": "https://jasoseol.com/a", "company": "A사", "title": "t", "source": "jasoseol", "tier": "적합", "reason": "r"}]
+
+    kept = batch_classify._dedupe_against_notion(results)
+
+    assert kept == results
+
+
+def test_record_excludes_companies_already_in_notion_from_discord_only(tmp_path, monkeypatch):
+    results = [
+        {"url": "https://jasoseol.com/a", "company": "H그룹", "title": "채용", "source": "jasoseol", "tier": "적합", "reason": "r"},
+        {"url": "https://jasoseol.com/b", "company": "D푸드", "title": "채용", "source": "jasoseol", "tier": "적합", "reason": "r"},
+    ]
+    results_path = _write_json(tmp_path, "results.json", results)
+    mark_calls = []
+    post_calls = []
+    monkeypatch.setattr(batch_classify.mongo_reader, "mark_classified", lambda **k: mark_calls.append(k))
+    monkeypatch.setattr(batch_classify.notion_writer, "fetch_existing_companies", lambda: ["H그룹"])
+    monkeypatch.setattr(batch_classify.discord_poster, "post_classified_results", lambda results: post_calls.append(results) or {"적합": "sent"})
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.test/webhook")
+
+    result = runner.invoke(batch_classify.app, ["record", str(results_path)])
+
+    assert result.exit_code == 0
+    assert len(mark_calls) == 2
+    assert len(post_calls) == 1
+    assert [item["company"] for item in post_calls[0]] == ["D푸드"]
+
+
 def test_record_skips_discord_when_webhook_unset(tmp_path, monkeypatch):
     results_path = _write_json(tmp_path, "results.json", _RESULTS)
     monkeypatch.setattr(batch_classify.mongo_reader, "mark_classified", lambda **k: None)

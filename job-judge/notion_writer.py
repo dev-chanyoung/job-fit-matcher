@@ -135,6 +135,48 @@ def _plain_text(prop: dict) -> str:
     return "".join(run.get("plain_text", run.get("text", {}).get("content", "")) for run in runs)
 
 
+def fetch_existing_companies(client=None, db_id: str | None = None) -> list[str]:
+    """Return the 회사명 (title property) of every row already in the
+    tracker DB, one entry per row (not deduplicated -- callers that only
+    care about distinct/normalized names build a set themselves). Used by
+    batch_classify.py's 1차 분류 workflow (2026-09-22 사용자 요청) to avoid
+    recommending a company again via Discord when it's already tracked here,
+    even under a brand-new posting URL/position the URL+position dedup in
+    save() wouldn't otherwise catch."""
+    if client is None:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        from notion_client import Client
+
+        client = Client(auth=os.environ.get("NOTION_API_KEY"))
+
+    if db_id is None:
+        db_id = os.environ.get("NOTION_DB_ID")
+
+    data_source_id = _resolve_data_source_id(client, db_id)
+
+    companies: list[str] = []
+    start_cursor = None
+    while True:
+        kwargs = {"data_source_id": data_source_id, "page_size": 100}
+        if start_cursor:
+            kwargs["start_cursor"] = start_cursor
+        result = client.data_sources.query(**kwargs)
+
+        for page in result.get("results", []):
+            company_prop = page.get("properties", {}).get("회사명", {})
+            company = "".join(run.get("plain_text", "") for run in company_prop.get("title", []))
+            if company:
+                companies.append(company)
+
+        if not result.get("has_more"):
+            break
+        start_cursor = result.get("next_cursor")
+
+    return companies
+
+
 def fetch_essay_question_rows(client=None, db_id: str | None = None) -> list[dict]:
     """Return every row that has non-empty 자기소개서 문항 text, with its
     pending questions already computed.

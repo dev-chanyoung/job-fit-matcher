@@ -41,6 +41,7 @@ import typer
 
 import discord_poster
 import mongo_reader
+import notion_writer
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -51,20 +52,28 @@ app = typer.Typer()
 # 소스 간 중복 회사 제거 시 남길 소스의 우선순위 (2026-09-22 사용자 요청: 자소설닷컴 우선).
 # 숫자가 작을수록 우선.
 _SOURCE_PRIORITY = {"jasoseol": 0, "saramin": 1}
-_CORP_DESIGNATOR_RE = re.compile(r"\(주\)|㈜|주식회사|그룹|\s+")
+_PAREN_RE = re.compile(r"\([^)]*\)")
+_CORP_DESIGNATOR_RE = re.compile(r"㈜|주식회사|그룹|\s+")
 
 
 def _normalize_company(name: str) -> str:
-    """Loosely normalize a company name for cross-source duplicate matching
-    -- strips common Korean corporate designators ((주)/㈜/주식회사), the
+    """Loosely normalize a company name for cross-source/Notion duplicate
+    matching -- strips any parenthetical qualifier (legal-entity markers
+    like "(주)"/"㈜", but also sub-division tags like "(제조계열사)" or
+    "(C부문)"), then common Korean corporate designators ("주식회사", the
     "그룹" (group) suffix some group-wide 공채 postings use in place of the
-    legal entity name (e.g. "G유통그룹" vs "(주)G유통"), and whitespace.
-    This is a heuristic, not an exact registry match: it can miss real
-    duplicates with unusual naming, or in principle over-merge two
-    genuinely different companies that happen to normalize the same way --
-    acceptable here since a human always reviews the Discord output before
-    acting on it."""
-    return _CORP_DESIGNATOR_RE.sub("", name)
+    legal entity name, e.g. "G유통그룹" vs "(주)G유통") and whitespace.
+    Deliberately collapses different divisions of the same parent company
+    (e.g. "A사(C부문)" and "A사(커머스부문)") to one key -- once ANY
+    row for a company exists in Notion, or a higher-priority source already
+    has it, that's the intended "already tracked, don't notify again"
+    behavior (2026-09-22 사용자 요청), not a bug. This is a heuristic, not an
+    exact registry match: it can miss real duplicates with unusual naming,
+    or in principle over-merge two genuinely different companies that
+    happen to normalize the same way -- acceptable here since a human
+    always reviews the Discord output before acting on it."""
+    without_parens = _PAREN_RE.sub("", name)
+    return _CORP_DESIGNATOR_RE.sub("", without_parens)
 
 
 def _dedupe_cross_source(results: list[dict]) -> list[dict]:
@@ -93,6 +102,26 @@ def _dedupe_cross_source(results: list[dict]) -> list[dict]:
         if not outranked:
             kept.append(item)
     return kept
+
+
+def _dedupe_against_notion(results: list[dict]) -> list[dict]:
+    """Drop any item whose normalized company already has at least one row
+    in the Notion tracker DB (2026-09-22 사용자 요청: H그룹/I항공처럼 이미
+    Notion에 올라가 있는 회사가 job-watcher에서 새 URL로 다시 발견되면서 또
+    Discord로 추천되는 문제) -- a company already being tracked doesn't need a
+    fresh notification just because the posting resurfaced under a different
+    URL/position (URL+position 기준인 notion_writer.save()의 dedup은 이 경우를
+    못 잡는다). Best-effort: if the Notion lookup itself fails (missing
+    credentials, network), results are returned unchanged with a warning --
+    this layer must never block record() from doing its core job of marking
+    MongoDB and sending Discord."""
+    try:
+        existing_companies = {_normalize_company(c) for c in notion_writer.fetch_existing_companies()}
+    except Exception as err:  # noqa: BLE001 -- best-effort layer, must not block record()
+        typer.echo(f"Notion 기존 회사 목록 조회 실패 -- 이 중복 제거 단계는 건너뜀: {err}")
+        return results
+
+    return [r for r in results if _normalize_company(r.get("company") or "") not in existing_companies]
 
 
 def _format_candidates_report(items: list[dict]) -> str:
@@ -176,10 +205,15 @@ def record(results_json: Path = typer.Argument(..., help="{url,company,title,sou
         typer.echo("DISCORD_WEBHOOK_URL 미설정 -- Discord 전송은 건너뜀.")
         raise typer.Exit(code=0)
 
-    deduped = _dedupe_cross_source(results)
-    dropped = len(results) - len(deduped)
-    if dropped:
-        typer.echo(f"소스 간 중복 {dropped}건은 자소설닷컴 우선으로 Discord 전송에서 제외 (MongoDB 기록은 그대로 유지).")
+    after_source_dedup = _dedupe_cross_source(results)
+    source_dropped = len(results) - len(after_source_dedup)
+    if source_dropped:
+        typer.echo(f"소스 간 중복 {source_dropped}건은 자소설닷컴 우선으로 Discord 전송에서 제외 (MongoDB 기록은 그대로 유지).")
+
+    deduped = _dedupe_against_notion(after_source_dedup)
+    notion_dropped = len(after_source_dedup) - len(deduped)
+    if notion_dropped:
+        typer.echo(f"이미 Notion에 있는 회사 {notion_dropped}건은 Discord 전송에서 제외 (MongoDB 기록은 그대로 유지).")
 
     statuses = discord_poster.post_classified_results(deduped)
     typer.echo(f"Discord 전송 결과: {statuses}")
