@@ -12,6 +12,20 @@ across every embed in one message, not per embed -- confirmed live
 2026-09-22 when an 84-posting run split purely by field count blew past it).
 Do not simplify this back to per-embed accounting; that's the exact bug that
 was already hit and fixed on the TypeScript side.
+
+Each Discord message contains AT MOST ONE tier's embed(s) -- never 적합/애매/
+부적합 combined in one message, even though that would still fit comfortably
+under the documented 10-embeds/6000-chars limits. This is deliberately more
+conservative than the documented limits: a live run on 2026-09-22 sending 3
+tier-embeds (적합 16 fields + 애매 21 fields + 부적합 10 fields, 5499 chars,
+well under budget) got a reproducible HTTP 500 from Discord's webhook 3/3
+times, while any single embed alone or any 2 combined succeeded every time.
+The exact cause was never isolated (500s aren't documented validation errors
+the way 400s are), so the fix here is empirical, not limit-math: never
+combine tiers into one message. Do not "optimize" this back to packing
+multiple tiers per message without re-verifying against a real webhook first
+-- a bad guess here posts broken/duplicate messages to a real channel, which
+is what happened while root-causing this the first time.
 """
 
 import os
@@ -40,8 +54,9 @@ def _field_for(item: dict) -> dict:
 
 class _MessagePacker:
     """Accumulates (title, items) tiers into Discord messages, respecting
-    all three Discord limits at once and always starting a fresh embed at a
-    tier boundary so 적합/애매/부적합 never share one embed."""
+    all three Discord limits at once and always starting a fresh MESSAGE (not
+    just a fresh embed) at a tier boundary, so 적합/애매/부적합 never share one
+    message -- see the module docstring for why."""
 
     def __init__(self):
         self.messages: list[list[dict]] = []
@@ -66,7 +81,7 @@ class _MessagePacker:
         self.message_chars = 0
 
     def start_tier(self, title: str):
-        self._flush_embed()
+        self._flush_message()
         self.embed_title = title
 
     def add_field(self, field: dict):
@@ -109,11 +124,15 @@ def _send(embeds: list[dict], webhook_url: str) -> None:
 
 
 def post_classified_results(results: list[dict], webhook_url: str | None = None) -> dict[str, str]:
-    """Send one Discord message per source, each containing one embed per
-    non-empty tier (split further only if Discord's limits require it).
+    """Send one Discord message per non-empty (source, tier) pair (split
+    further into more messages only if a single tier alone is big enough to
+    need it -- see module docstring for why tiers are never combined).
     Returns {source: "sent" | "failed: <error>"} -- a failure for one source
     doesn't stop the others (mirrors notifyBySource in discord.ts)."""
     if webhook_url is None:
+        from dotenv import load_dotenv
+
+        load_dotenv()
         webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
     if not webhook_url:
         raise RuntimeError("DISCORD_WEBHOOK_URL is not set")

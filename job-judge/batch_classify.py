@@ -122,6 +122,9 @@ def record(results_json: Path = typer.Argument(..., help="{url,company,title,sou
         )
     typer.echo(f"MongoDB에 {len(results)}건 기록 완료.")
 
+    from dotenv import load_dotenv
+
+    load_dotenv()
     if not os.environ.get("DISCORD_WEBHOOK_URL"):
         typer.echo("DISCORD_WEBHOOK_URL 미설정 -- Discord 전송은 건너뜀.")
         raise typer.Exit(code=0)

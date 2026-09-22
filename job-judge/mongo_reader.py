@@ -40,6 +40,9 @@ def source_from_url(url: str) -> str:
 
 def _get_db(client=None):
     if client is None:
+        from dotenv import load_dotenv
+
+        load_dotenv()
         from pymongo import MongoClient
 
         uri = os.environ.get("MONGODB_URI")

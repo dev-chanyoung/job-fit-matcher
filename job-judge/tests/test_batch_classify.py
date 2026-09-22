@@ -109,6 +109,10 @@ def test_record_skips_discord_when_webhook_unset(tmp_path, monkeypatch):
     post_calls = []
     monkeypatch.setattr(batch_classify.discord_poster, "post_classified_results", lambda results: post_calls.append(results))
     monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    # record() now calls load_dotenv() itself before checking the env var --
+    # stub it so this repo's real local .env (which has a real webhook
+    # configured) can't repopulate DISCORD_WEBHOOK_URL and defeat this test.
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: None)
 
     result = runner.invoke(batch_classify.app, ["record", str(results_path)])
 
