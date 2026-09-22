@@ -195,6 +195,12 @@
   1. WebFetch로 JD 확인 → 하드필터에 필요한 최소한(`required_years`/`deadline`, 그리고 등급 판단에
      쓸 `tech_stack`/`domain`/`responsibilities`)만 채운 `JobPosting`을 만든다. 정식 평가 때처럼
      모든 필드를 채울 필요는 없다 — 이 단계 목적은 등급 판단이지 저장이 아니다.
+     **사람인(`saramin.co.kr`) URL 주의**: `.../jobs/relay/view?rec_idx=...` 형태 URL을 그대로
+     WebFetch하면 nav/footer 뼈대만 나오고 실제 JD 본문이 안 잡힌다(2026-09-22 확인) — 본문은 같은
+     origin의 `.../jobs/relay/view-detail?rec_idx=...&rec_seq=0` iframe 안에 있다. 이 URL로
+     바꿔서 WebFetch하면 바로 본문이 나온다. 일부 공고(전체의 약 1/5)는 이 URL로도 자격요건 서술문
+     없이 직종/기술스택 태그 요약만 나오는데, 이 경우 태그만 보고 추측하지 말고 tier="애매" +
+     "자격요건 서술 없음, 태그만 확인" 같은 사유를 남긴다("확인 안 되면 추측하지 않는다" 원칙 재사용).
   2. `hard_filter.hard_filter(job)`을 그대로 재사용한다. **탈락하면 별도 LLM 판단 없이 바로
      tier="부적합"**, reason은 하드필터가 반환한 사유 문자열을 그대로 쓴다 (토큰 낭비 방지 — 정식
      평가 흐름과 동일한 원칙).
