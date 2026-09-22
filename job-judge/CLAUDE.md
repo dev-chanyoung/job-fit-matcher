@@ -169,11 +169,63 @@
 - 이 워크플로는 `judge_manual.py`의 하드필터/평가 파이프라인과 완전히 독립적이다 — job.json이나
   Evaluation JSON을 거치지 않고, 기존에 저장된 Notion 행을 대상으로만 동작한다.
 
+## 세션 시작 시 자동 1차 분류 워크플로 (2026-09-22 사용자 요청)
+
+`job-watcher`(`../job-watcher`)는 신규 공고를 발견하면 Discord에 그대로(필터링 없이) 알림만 보낸다.
+매번 그 목록 전체를 훑어보기엔 부담스럽다는 사용자 요청으로, Claude Code 세션이 시작될 때마다 그동안
+쌓인 신규 공고를 가볍게 훑어서 **적합/애매/부적합** 세 등급으로 나눠 Discord에 다시 정리해서 보내는
+기능이다. 이건 `judge_manual.py`가 하는 정식 4단계 정성평가(근거별 배점, Notion 저장)가 **아니다** —
+그 무거운 평가를 할 가치가 있는 공고만 먼저 걸러내는 가벼운 사전 필터다. 3단계로 정한 이유: 이 단계는
+근거 하나하나를 대조하는 정밀 판단이 아니라 "정성평가할 가치가 있는지"만 보는 거라, "적합"과
+"어느정도 맞음" 같은 세밀한 경계를 두면 실행마다 기준이 흔들려 재현성이 떨어진다 — 세 갈래(볼 것 /
+애매해서 훑어볼 것 / 패스)면 충분하고 Discord embed 공간도 덜 든다.
+
+- **역할 분담**: `mongo_reader.py`/`discord_poster.py`/`batch_classify.py`는 기계적인 부분만
+  처리한다 — 후보 목록 조회(MongoDB), 분류 상태 기록(MongoDB), Discord 전송. **등급을 매기는 판단
+  자체는 항상 Claude Code 세션(나)의 몫**이지 코드가 하지 않는다 (하드필터/평가 단계의 역할 분담과
+  동일한 원칙).
+- **후보 소스**: `job-watcher`가 `job_watcher.seen_postings`(MongoDB, URL이 `_id`)에 신규 공고를
+  적어둔다. `job-judge`는 여기서 **읽기만** 하고, 같은 DB의 `job_judge_classified` 컬렉션에 자기
+  상태만 쓴다 — `job-watcher`의 컬렉션은 절대 건드리지 않는다.
+- **SessionStart 훅**: `python batch_classify.py candidates --json-hook`이 `seen_postings`에는
+  있지만 `job_judge_classified`에는 없는(=아직 1차 분류 안 된) 공고가 있으면 세션 컨텍스트로 알려준다
+  (`.claude/settings.json`, essay_keywords.py 훅과 같은 패턴). `MONGODB_URI`가 로컬에 아직 없거나
+  DB 연결이 안 되면 세션 시작을 막지 않도록 조용히 넘어간다(에러 없음) — 이 기능은 선택 사항이라서다.
+- **알림을 받으면 이렇게 처리** (공고마다):
+  1. WebFetch로 JD 확인 → 하드필터에 필요한 최소한(`required_years`/`deadline`, 그리고 등급 판단에
+     쓸 `tech_stack`/`domain`/`responsibilities`)만 채운 `JobPosting`을 만든다. 정식 평가 때처럼
+     모든 필드를 채울 필요는 없다 — 이 단계 목적은 등급 판단이지 저장이 아니다.
+  2. `hard_filter.hard_filter(job)`을 그대로 재사용한다. **탈락하면 별도 LLM 판단 없이 바로
+     tier="부적합"**, reason은 하드필터가 반환한 사유 문자열을 그대로 쓴다 (토큰 낭비 방지 — 정식
+     평가 흐름과 동일한 원칙).
+  3. 통과한 공고만 `profile.md`의 `- 키워드:` 태그와 JD의 기술스택/도메인/업무내용을 가볍게 대조해서
+     적합/애매 중 하나로 판단하고, 왜 그런지 한 줄 reason을 남긴다 (evidence 항목별 근거를 쓰는 정식
+     평가와 달리, 여기서는 한두 문장이면 충분).
+- **기록 + 전송**: 세션이 처리한 후보 전체(부적합 포함)를
+  `[{"url","company","title","source","tier","reason"}, ...]` JSON으로 모아
+  `python batch_classify.py record <results.json>`을 **한 번만** 실행한다 — 이 명령이
+  `mongo_reader.mark_classified()`로 MongoDB에 기록해서 같은 공고가 다음 세션에 다시 후보로 뜨지
+  않게 하고, 동시에 `discord_poster.post_classified_results()`로 출처별(자소설닷컴 1번대/사람인
+  2번대)·등급별("1-1. 자소설닷컴 ✅ 적합 (N건)" 형식) Discord 메시지를 보낸다. `source`는
+  `mongo_reader.source_from_url()`이 URL 도메인으로 이미 판단해서 후보 목록에 넣어주므로 그대로
+  쓰면 된다.
+- **Notion과는 무관**: 이 워크플로는 Notion을 전혀 건드리지 않는다. "적합"으로 뜬 공고를 실제로
+  지원 검토하고 싶으면, 그 URL을 다시 평소처럼 세션에 붙여넣어서 `judge_manual.py`의 정식
+  하드필터+평가 흐름을 별도로 돌린다.
+- **비용 특성**: 첫 활성화 시점엔 `job-watcher`가 그동안 쌓아둔 백로그 전체가 후보로 뜨므로 그 회차만
+  비용이 크게 튈 수 있다 — 후보 수가 많으면(대략 15건 이상) 한 번에 다 처리하지 말고 사용자에게
+  진행 여부를 먼저 물어본다. 이후 세션부터는 `job_judge_classified`가 상태를 기억하므로 매번 "그동안
+  새로 들어온 것"만큼만 처리한다.
+
 ## 환경 설정 관련 주의사항
 
 - `.env`에는 실제 키, `.env.example`에는 **절대 실제 값을 넣지 않는다** (git에 커밋되는 템플릿
   파일이라 유출 위험). `.gitignore`에 `.env`가 이미 등록되어 있다.
 - `NOTION_DB_ID`는 Notion URL에서 `?v=...` 뒷부분을 뺀 32자리 ID만 사용한다.
+- `MONGODB_URI`/`DISCORD_WEBHOOK_URL`(1차 분류 워크플로 전용, 둘 다 선택)은 `job-watcher`가 이미
+  쓰고 있는 같은 값을 Vercel 프로젝트 설정에서 그대로 복사해서 `job-judge/.env`에 넣으면 된다 —
+  job-watcher의 로컬 `.env`엔 없고(배포 환경변수로만 관리) Vercel 대시보드에만 있으므로, 필요하면
+  거기서 값을 확인해야 한다.
 - Notion API는 2025-09+ 기준 "데이터소스" 구조로 바뀌었다: `client.databases.query`는 더 이상
   존재하지 않고 `client.data_sources.query(data_source_id=...)`를 쓴다. `notion_writer.py`의
   `_resolve_data_source_id()`가 이미 이 변환을 처리하므로, 이 프로젝트 코드를 건드릴 때 옛날 API
