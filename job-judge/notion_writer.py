@@ -378,17 +378,19 @@ def format_result_analysis(
     return "\n".join(lines)
 
 
-def format_verdict_summary(evaluation: Evaluation, version: str = "v1") -> str:
+def format_verdict_summary(evaluation: Evaluation, version: str = "v1.4") -> str:
     """One-line summary for the 결과분석 TABLE PROPERTY -- verdict + total
     score only, so the table view stays scannable instead of showing the
     full multi-paragraph breakdown inline in every cell (2026-09-20 사용자
     요청: 표에서는 판정 결과 한 줄만 보이고, 상세 내용은 페이지를 열어야(클릭)
     보이도록 해달라는 요청). The full breakdown from format_result_analysis
     still belongs in the page BODY (as blocks), not in this property.
+
+    Format is "[버전] 판정 (총점: N, 정보충분도: Y)" -- no date, no "-manual"
+    suffix (2026-09-23 사용자 요청: 표가 지저분해진다며 더 간결한 포맷 요청).
     """
     total = sum(evaluation.scores.get(key, 0) for key, _ in SCORE_LABELS)
-    date_str = datetime.now().date().isoformat()
-    return f"[{version}/{date_str}] {evaluation.verdict} (총점 {total}, 정보충분도: {evaluation.evidence_quality})"
+    return f"[{version}] {evaluation.verdict} (총점: {total}, 정보충분도: {evaluation.evidence_quality})"
 
 
 def _title(content: str) -> dict:
@@ -532,7 +534,7 @@ def save(
     filtered_reason: list[str] | None = None,
     client=None,
     db_id: str | None = None,
-    version: str = "v1",
+    version: str = "v1.4",
 ) -> None:
     """Create or update a row in the 백엔드_공고_트래커 Notion DB for job.
 

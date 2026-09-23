@@ -352,7 +352,7 @@ class TestSaveNewRow:
 
         _, kwargs = mock_client.pages.create.call_args
         analysis_text = kwargs["properties"]["결과분석"]["rich_text"][0]["text"]["content"]
-        assert analysis_text == format_verdict_summary(evaluation, version="v1")
+        assert analysis_text == format_verdict_summary(evaluation, version="v1.4")
         assert "\n" not in analysis_text
 
     def test_writes_company_size_and_domain_when_they_match_fixed_options(self):

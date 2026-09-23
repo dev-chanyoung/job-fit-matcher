@@ -60,7 +60,7 @@ def run(
         "--evaluation",
         help="Evaluation 필드를 담은 JSON 파일 경로 (하드필터 통과 후 2차 실행 시 제공)",
     ),
-    version: str = typer.Option("v1-manual", "--version", help="평가기준버전 태그"),
+    version: str = typer.Option("v1.4", "--version", help="평가기준버전 태그"),
 ):
     job = _load_job(job_json)
 

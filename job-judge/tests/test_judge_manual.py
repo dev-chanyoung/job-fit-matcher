@@ -107,7 +107,7 @@ def test_pass_with_evaluation_saves_full_result(tmp_path, monkeypatch):
     _, kwargs = save_calls[0]
     assert kwargs.get("evaluation") is not None
     assert kwargs.get("evaluation").verdict == _VALID_EVALUATION["verdict"]
-    assert kwargs.get("version") == "v1-manual"
+    assert kwargs.get("version") == "v1.4"
 
 
 def test_rejected_job_ignores_provided_evaluation(tmp_path, monkeypatch):
