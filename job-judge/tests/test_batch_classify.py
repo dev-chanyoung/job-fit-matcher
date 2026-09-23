@@ -116,6 +116,54 @@ def test_dedupe_cross_source_prefers_jasoseol():
     assert kept_urls == {"https://jasoseol.com/x", "https://www.saramin.co.kr/z"}
 
 
+def test_dedupe_cross_source_keeps_role_specific_saramin_listing():
+    """A saramin listing naming an actual role is NOT the same posting as a
+    jasoseol company-wide bundle -- both should reach Discord (2026-09-23
+    사용자 요청)."""
+    results = [
+        {"url": "https://jasoseol.com/x", "company": "C그룹", "title": "26년 하반기 신입사원 모집", "source": "jasoseol", "tier": "적합", "reason": "r"},
+        {"url": "https://www.saramin.co.kr/y", "company": "C그룹", "title": "26년 하반기 신입사원 채용 (데이터 사이언티스트/데이터)", "source": "saramin", "tier": "적합", "reason": "r"},
+    ]
+
+    kept = batch_classify._dedupe_cross_source(results)
+
+    kept_urls = {item["url"] for item in kept}
+    assert kept_urls == {"https://jasoseol.com/x", "https://www.saramin.co.kr/y"}
+
+
+def test_dedupe_cross_source_still_drops_matching_generic_bundle():
+    """A saramin listing that's itself just a generic company-wide
+    announcement (no role named) is still treated as the same posting as
+    the jasoseol bundle and dropped."""
+    results = [
+        {"url": "https://jasoseol.com/x", "company": "G유통그룹", "title": "2027년 신입사원 채용", "source": "jasoseol", "tier": "적합", "reason": "r"},
+        {"url": "https://www.saramin.co.kr/y", "company": "(주)G유통", "title": "2027년 G유통그룹 신입사원 채용", "source": "saramin", "tier": "적합", "reason": "r"},
+    ]
+
+    kept = batch_classify._dedupe_cross_source(results)
+
+    assert {item["url"] for item in kept} == {"https://jasoseol.com/x"}
+
+
+class TestIsGenericBundleTitle:
+    def test_no_parens_is_generic(self):
+        assert batch_classify._is_generic_bundle_title("2026 신입사원 공개채용") is True
+
+    def test_generic_qualifier_paren_is_generic(self):
+        assert batch_classify._is_generic_bundle_title("2026년 신규직원(채용연계형 인턴) 채용공고") is True
+
+    def test_role_paren_is_not_generic(self):
+        assert batch_classify._is_generic_bundle_title("2026년 하반기 신입사원 채용(AX_AI 개발)") is False
+
+    def test_nested_role_paren_is_not_generic(self):
+        assert (
+            batch_classify._is_generic_bundle_title(
+                "J그룹 2026년 하반기 신입사원 공개채용(웹개발자(AI응용))"
+            )
+            is False
+        )
+
+
 def test_dedupe_cross_source_keeps_multiple_postings_from_same_source():
     results = [
         {"url": "https://jasoseol.com/a", "company": "D식품", "title": "백엔드", "source": "jasoseol", "tier": "적합", "reason": "r"},

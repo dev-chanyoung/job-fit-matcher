@@ -55,6 +55,14 @@ _SOURCE_PRIORITY = {"jasoseol": 0, "saramin": 1}
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _CORP_DESIGNATOR_RE = re.compile(r"㈜|주식회사|그룹|\s+")
 
+# 제목에 이 괄호 내용만 있으면 "특정 직무를 콕 집지 않은 일반 문구"로 취급한다
+# (2026-09-23 사용자 요청 -- 아래 _is_generic_bundle_title 참고).
+_GENERIC_TITLE_PAREN_TOKENS = {
+    "신입", "경력", "신입/경력", "신입 또는 경력", "인턴", "정규직", "계약직",
+    "채용연계형 인턴", "체험형 인턴", "체험형",
+}
+_TITLE_PAREN_RE = re.compile(r"\(([^()]*(?:\([^()]*\))?[^()]*)\)")
+
 
 def _normalize_company(name: str) -> str:
     """Loosely normalize a company name for cross-source/Notion duplicate
@@ -76,13 +84,39 @@ def _normalize_company(name: str) -> str:
     return _CORP_DESIGNATOR_RE.sub("", without_parens)
 
 
+def _is_generic_bundle_title(title: str) -> bool:
+    """True when `title` reads as a company-wide "we're hiring" announcement
+    with no specific role named -- e.g. "2026 신입사원 공개채용" or "26년
+    하반기 신입사원 채용" -- as opposed to a specific-role posting like
+    "J그룹 2026년 하반기 신입사원 공개채용(웹개발자(AI응용))" or "26년
+    하반기 신입사원 채용 (데이터 사이언티스트/데이터)" (2026-09-23 사용자
+    요청). jasoseol postings are almost always the former (one page bundling
+    every division/role of a group-wide 공채); saramin postings for the same
+    company are often the latter (one specific role) -- so a company-name
+    match alone isn't enough to call two listings "the same posting". Only a
+    title with NO parenthetical content, or whose only parenthetical content
+    is a generic employment-type qualifier (_GENERIC_TITLE_PAREN_TOKENS,
+    e.g. "(신입)", "(인턴)"), counts as generic; any other parenthetical
+    (a role, 부문, 트랙 name) makes it role-specific. Heuristic, not a JD
+    diff -- a role named outside parentheses (rare in observed titles) would
+    still be missed, and a human reviews the Discord output regardless."""
+    generic_tokens = {t.replace(" ", "") for t in _GENERIC_TITLE_PAREN_TOKENS}
+    parens = _TITLE_PAREN_RE.findall(title)
+    return all(p.replace(" ", "") in generic_tokens for p in parens)
+
+
 def _dedupe_cross_source(results: list[dict]) -> list[dict]:
-    """Drop an item when a higher-priority source (jasoseol over saramin)
-    already has an item for the same normalized company, so the same
-    company's posting is never recommended from more than one source.
-    Items are never dropped for duplicating another item from their OWN
-    source -- a single source can legitimately list multiple distinct
-    postings for one company."""
+    """Drop an item only when it's both (a) outranked by a higher-priority
+    source (jasoseol over saramin) that has an item for the same normalized
+    company, AND (b) itself reads as a generic company-wide bundle title
+    (_is_generic_bundle_title) -- i.e. the two listings plausibly describe
+    the SAME posting. A role-specific title (e.g. a saramin listing naming
+    an actual position) is kept even when the company already has a generic
+    jasoseol bundle, since that jasoseol page won't have that role's actual
+    담당업무/자격요건 detail (2026-09-23 사용자 요청 -- 같은 공고면 자소설만,
+    내용이 다르면 둘 다 보낸다). Items are never dropped for duplicating
+    another item from their OWN source -- a single source can legitimately
+    list multiple distinct postings for one company."""
     companies_by_source: dict[str, set[str]] = {}
     for item in results:
         key = _normalize_company(item.get("company") or "")
@@ -99,7 +133,7 @@ def _dedupe_cross_source(results: list[dict]) -> list[dict]:
             if other_source != source
             and _SOURCE_PRIORITY.get(other_source, 99) < _SOURCE_PRIORITY.get(source, 99)
         )
-        if not outranked:
+        if not outranked or not _is_generic_bundle_title(item.get("title") or ""):
             kept.append(item)
     return kept
 
