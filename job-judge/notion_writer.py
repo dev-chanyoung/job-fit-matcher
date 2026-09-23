@@ -308,7 +308,9 @@ def format_result_analysis(
     were previously collected on the Evaluation model but never shown here.
     A score-verdict contradiction warning (필수요건_충족 too low for an
     "적극 지원" verdict) is now enforced here in code, not left to the LLM
-    to remember to write.
+    to remember to write. evaluation.summary (2026-09-23) -- a short verdict
+    recap, not a restatement of evidence -- is rendered as "총평: ..." right
+    above the score-breakdown reference line, when present.
 
     uncertain_company_size/uncertain_domain are only for the case where the
     guess doesn't match a fixed Notion select option -- they get mentioned
@@ -362,6 +364,9 @@ def format_result_analysis(
 
     if evaluation.cover_letter_topics:
         lines += ["", f"자소서 소재: {', '.join(evaluation.cover_letter_topics)}"]
+
+    if evaluation.summary:
+        lines += ["", f"총평: {evaluation.summary}"]
 
     lines += ["", f"(참고) 배점: {score_parts} (총{total})"]
     if evaluation.score_breakdown:

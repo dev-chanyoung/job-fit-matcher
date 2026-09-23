@@ -44,6 +44,11 @@ class Evidence(BaseModel):
 class Evaluation(BaseModel):
     verdict: Literal["적극 지원", "지원 고려", "보류"]
     scores: dict[str, int]  # SCORE_CAPS의 5개 키, 각 0~해당 상한 범위 (아래 validator가 강제)
+    # 2~4문장짜리 총평 -- evidence/gaps/risks를 다시 나열하지 않고 판정 이유를 압축 요약한다
+    # (2026-09-23 사용자 요청). format_result_analysis()가 "(참고) 배점:" 바로 위에 "총평: "으로
+    # 붙인다. 채워지지 않으면(빈 문자열) 그 줄 자체를 생략한다 -- 기존 데이터 호환을 위해 기본값은
+    # 빈 문자열이지만, 새로 작성하는 Evaluation은 항상 채운다.
+    summary: str = ""
     evidence: list[Evidence] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
     cover_letter_topics: list[str] = Field(default_factory=list)

@@ -137,6 +137,20 @@ class TestFormatResultAnalysis:
         # The headline sections appear before the reference score line.
         assert text.index("적합한 부분:") < text.index("(참고) 배점:")
 
+    def test_shows_summary_line_right_above_score_reference(self):
+        evaluation = _valid_evaluation(summary="Spring Boot 경력은 강하지만 메시지 브로커 운영 경험이 없어 지원 고려 수준.")
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "총평: Spring Boot 경력은 강하지만 메시지 브로커 운영 경험이 없어 지원 고려 수준." in text
+        assert text.index("총평:") < text.index("(참고) 배점:")
+        assert text.index("자소서 소재:") < text.index("총평:")
+
+    def test_omits_summary_line_when_empty(self):
+        evaluation = _valid_evaluation(summary="")
+        text = format_result_analysis(evaluation, version="v1")
+
+        assert "총평:" not in text
+
     def test_exposes_evidence_quality_under_verdict(self):
         evaluation = _valid_evaluation(evidence_quality="일부 부족")
         text = format_result_analysis(evaluation, version="v1")
