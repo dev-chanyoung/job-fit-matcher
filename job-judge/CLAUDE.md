@@ -287,6 +287,18 @@
   쓰고 있는 같은 값을 Vercel 프로젝트 설정에서 그대로 복사해서 `job-judge/.env`에 넣으면 된다 —
   job-watcher의 로컬 `.env`엔 없고(배포 환경변수로만 관리) Vercel 대시보드에만 있으므로, 필요하면
   거기서 값을 확인해야 한다.
+- **일회성 스크립트에서 `load_dotenv()`를 인자 없이 호출하지 않는다** (2026-09-23 확인). 이 환경(Git
+  Bash on Windows, 세션 스크래치패드처럼 job-judge 밖 경로의 파일을 `python "<긴 경로>/foo.py"`로
+  실행하는 경우)에서는 인자 없는 `load_dotenv()`가 `.env`를 못 찾고 조용히 넘어가는 경우가 있고,
+  이러면 `NOTION_API_KEY`가 비어서 Notion API가 **"Authorization header must use the format
+  'Bearer <token>'"**라는, 마치 속도제한처럼 보이는 401을 던진다 — 실제로는 인증 헤더가 아예
+  안 실렸을 뿐인데 이 오류 문구만 보고 "쓰기 속도제한에 걸렸다"고 몇 시간을 오판했던 적이 있다
+  (본 프로젝트 코드 파일들은 이미 전부 `load_dotenv()`를 인자 없이 쓰고 있지만 `notion_writer.py`
+  등에서는 실행 위치가 항상 `job-judge/`라 문제된 적이 없었다 — 문제는 스크래치패드 임시 스크립트를
+  다른 경로에서 실행할 때만 발생). 새 임시 스크립트를 짤 때는 항상
+  `load_dotenv("<job-judge 절대경로>/.env")`처럼 명시적 경로를 준다. 진짜 쓰기 속도제한(짧은 시간에
+  PATCH/DELETE를 아주 많이 연달아 보냈을 때)도 존재하긴 하지만, 그 경우도 몇 초~수십 초면 회복되므로
+  같은 401이 몇 분 넘게 계속되면 토큰 로딩 문제부터 의심한다.
 - Notion API는 2025-09+ 기준 "데이터소스" 구조로 바뀌었다: `client.databases.query`는 더 이상
   존재하지 않고 `client.data_sources.query(data_source_id=...)`를 쓴다. `notion_writer.py`의
   `_resolve_data_source_id()`가 이미 이 변환을 처리하므로, 이 프로젝트 코드를 건드릴 때 옛날 API
