@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-cj_imgs/
+*_imgs/
 .fork_scratch/
 .playwright-mcp/
+# 개인정보 -- 로컬 전용 (profile.example.md 참고)
+profile.md
