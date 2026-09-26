@@ -21,7 +21,9 @@ import type { Posting, SeenEntry } from "../lib/types.js";
 
 function isAuthorized(request: VercelRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return true; // 로컬 테스트 등 CRON_SECRET 미설정 시엔 검사 생략
+  // CRON_SECRET이 비어 있으면 로컬 실행에서만 검사를 생략한다. Vercel 런타임(VERCEL=1)에서는
+  // 설정이 빠졌더라도 엔드포인트가 열리지 않도록 거부한다 (공개 저장소라 배포 URL과 이 코드가 노출됨).
+  if (!cronSecret) return process.env.VERCEL !== "1";
   return request.headers.authorization === `Bearer ${cronSecret}`;
 }
 
