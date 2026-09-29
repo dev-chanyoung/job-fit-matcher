@@ -192,6 +192,12 @@ class TestExtractMandatoryMinYears:
     def test_new_grad_negation_is_not_an_alternative(self):
         assert extract_mandatory_min_years("경력 3년 이상 (신입 지원 불가)") == 3
 
+    def test_new_grad_negation_before_keyword_is_not_an_alternative(self):
+        assert extract_mandatory_min_years("경력 3년 이상 (지원 불가 신입)") == 3
+
+    def test_negation_in_other_clause_does_not_cancel_new_grad_alternative(self):
+        assert extract_mandatory_min_years("경력자 제외, 신입 또는 경력 3년 이상") is None
+
     def test_preference_in_unrelated_clause_does_not_cover_mandatory_years(self):
         assert extract_mandatory_min_years("경력 3년 이상, 금융권 경험 우대") == 3
 
