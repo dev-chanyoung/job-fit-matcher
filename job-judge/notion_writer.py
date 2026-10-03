@@ -64,7 +64,7 @@ FIXED_TECH_STACK_OPTIONS = [
 # 기업규모/도메인 fixed select options, exactly as configured in the Notion
 # database. Same rule as 기술스택: only an exact (case-sensitive) match may be
 # written to the column -- automation must never introduce a new option.
-FIXED_COMPANY_SIZE_OPTIONS = ["스타트업", "중견기업", "대기업"]
+FIXED_COMPANY_SIZE_OPTIONS = ["스타트업", "중견기업", "대기업", "공기업"]
 FIXED_DOMAIN_OPTIONS = ["커머스", "핀테크", "금융", "제조/자동차", "IT서비스", "통신"]
 
 SCORE_LABELS = [

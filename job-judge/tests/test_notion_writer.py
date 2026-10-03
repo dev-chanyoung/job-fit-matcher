@@ -82,8 +82,11 @@ class TestMatchCompanySizeAndDomain:
     def test_company_size_exact_match_passes_through(self):
         assert match_company_size("대기업") == "대기업"
 
+    def test_company_size_public_enterprise_is_an_option(self):
+        assert match_company_size("공기업") == "공기업"
+
     def test_company_size_non_option_is_dropped(self):
-        assert match_company_size("공기업") is None
+        assert match_company_size("외국계") is None
 
     def test_domain_exact_match_passes_through(self):
         assert match_domain("IT서비스") == "IT서비스"
@@ -260,11 +263,11 @@ class TestFormatResultAnalysis:
         text = format_result_analysis(
             evaluation,
             version="v1",
-            uncertain_company_size="공기업",
+            uncertain_company_size="외국계",
             uncertain_domain="항공운송업",
         )
 
-        assert "추정 기업규모: 공기업 (고정 옵션에 없어 컬럼 미기입)" in text
+        assert "추정 기업규모: 외국계 (고정 옵션에 없어 컬럼 미기입)" in text
         assert "추정 도메인: 항공운송업 (고정 옵션에 없어 컬럼 미기입)" in text
 
 
@@ -388,7 +391,7 @@ class TestSaveNewRow:
         needs to guarantee the columns themselves stay blank."""
         mock_client = _mock_client_with_data_source([])
 
-        job = _valid_job(company_size="공기업", domain="항공운송업")
+        job = _valid_job(company_size="외국계", domain="항공운송업")
         save(job, _valid_evaluation(), client=mock_client, db_id="fake-db-id")
 
         _, kwargs = mock_client.pages.create.call_args
