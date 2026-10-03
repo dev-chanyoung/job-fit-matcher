@@ -17,6 +17,7 @@ from notion_writer import (  # noqa: E402
     fetch_essay_question_rows,
     find_pending_questions,
     format_result_analysis,
+    format_result_analysis_blocks,
     format_verdict_summary,
     match_company_size,
     match_domain,
@@ -269,6 +270,69 @@ class TestFormatResultAnalysis:
 
         assert "추정 기업규모: 외국계 (고정 옵션에 없어 컬럼 미기입)" in text
         assert "추정 도메인: 항공운송업 (고정 옵션에 없어 컬럼 미기입)" in text
+
+
+class TestFormatResultAnalysisBlocks:
+    @staticmethod
+    def _text(block):
+        return "".join(r["text"]["content"] for r in block[block["type"]]["rich_text"])
+
+    def test_leads_with_verdict_callout_then_summary(self):
+        evaluation = _valid_evaluation(summary="핵심 요건은 맞지만 메시지 브로커 경험이 없다.")
+        blocks = format_result_analysis_blocks(evaluation, version="v1.4")
+
+        assert blocks[0]["type"] == "callout"
+        assert blocks[0]["callout"]["icon"]["emoji"] == "🤔"
+        head = self._text(blocks[0])
+        assert "지원 고려" in head and "근거 충분" in head and "총점: 76" in head and "v1.4" in head
+        assert blocks[1]["type"] == "callout" and "메시지 브로커" in self._text(blocks[1])
+
+    def test_evidence_is_a_paragraph_led_by_level_emoji_not_a_bullet(self):
+        """사용자 요청: 검은 글머리표 점 옆에 색 점이 같이 보이지 않게."""
+        blocks = format_result_analysis_blocks(_valid_evaluation())
+        evidence = [b for b in blocks if self._text(b).startswith("🟢 Spring")]
+
+        assert len(evidence) == 1
+        assert evidence[0]["type"] == "paragraph"
+        runs = evidence[0]["paragraph"]["rich_text"]
+        assert runs[1]["text"]["content"] == "Spring Boot 백엔드 개발 경험"
+        assert runs[1]["annotations"]["bold"] is True
+        assert "\n→ Spring Boot 3년 경력" in self._text(evidence[0])
+
+    def test_gaps_go_under_the_mismatch_heading(self):
+        blocks = format_result_analysis_blocks(_valid_evaluation())
+        texts = [self._text(b) for b in blocks]
+        mismatch = texts.index("⚠️ 부족하거나 안 맞는 부분")
+
+        assert texts[mismatch + 1] == "▪️ 메시지 브로커 운영 경험 없음"
+
+    def test_score_breakdown_is_folded_into_a_toggle(self):
+        evaluation = _valid_evaluation(score_breakdown={"기술스택_일치": "Java 100%x1 -> 25점"})
+        toggle = format_result_analysis_blocks(evaluation)[-1]
+
+        assert toggle["type"] == "toggle"
+        assert "필수요건28" in self._text(toggle)
+        child = toggle["toggle"]["children"][0]
+        assert self._text(child) == "기술스택: Java 100%x1 -> 25점"
+
+    def test_cover_letter_topics_omitted_by_default(self):
+        texts = [self._text(b) for b in format_result_analysis_blocks(_valid_evaluation())]
+        assert "실시간 처리 프로젝트 경험" not in texts
+
+    def test_mandatory_score_warning_callout(self):
+        evaluation = _valid_evaluation(
+            verdict="적극 지원",
+            scores={"필수요건_충족": 5, "기술스택_일치": 20, "업무내용_일치": 15, "우대사항": 10, "도메인_연관성": 5},
+        )
+        blocks = format_result_analysis_blocks(evaluation)
+
+        assert blocks[1]["callout"]["icon"]["emoji"] == "⚠️"
+        assert "점수-판정 불일치" in self._text(blocks[1])
+
+    def test_long_text_is_split_under_notion_run_limit(self):
+        evaluation = _valid_evaluation(summary="가" * 4500)
+        summary = format_result_analysis_blocks(evaluation)[1]
+        assert all(len(r["text"]["content"]) <= 2000 for r in summary["callout"]["rich_text"])
 
 
 class TestFormatVerdictSummary:

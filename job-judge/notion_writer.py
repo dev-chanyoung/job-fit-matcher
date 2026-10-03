@@ -398,6 +398,153 @@ def format_verdict_summary(evaluation: Evaluation, version: str = "v1.4") -> str
     return f"[{version}] {evaluation.verdict} (총점: {total}, 정보충분도: {evaluation.evidence_quality})"
 
 
+_LEVEL_EMOJI = {"강함": "🟢", "일부": "🟡", "미확인": "⚪", "없음": "🔴"}
+_VERDICT_CALLOUT = {
+    "적극 지원": ("🚀", "green_background"),
+    "지원 고려": ("🤔", "yellow_background"),
+    "보류": ("⏸️", "gray_background"),
+}
+_LEVEL_LEGEND = "🟢 강함 · 🟡 일부 · ⚪ 미확인 · 🔴 없음"
+# Notion caps a single rich_text run at 2000 chars.
+_RICH_TEXT_LIMIT = 1900
+
+
+def _run(content: str, bold: bool = False, color: str = "default") -> list[dict]:
+    return [
+        {
+            "type": "text",
+            "text": {"content": content[i : i + _RICH_TEXT_LIMIT]},
+            "annotations": {"bold": bold, "color": color},
+        }
+        for i in range(0, max(len(content), 1), _RICH_TEXT_LIMIT)
+    ]
+
+
+def _block(kind: str, rich_text: list[dict], **extra) -> dict:
+    return {"object": "block", "type": kind, kind: {"rich_text": rich_text, **extra}}
+
+
+def format_result_analysis_blocks(
+    evaluation: Evaluation,
+    version: str = "v1.4",
+    uncertain_company_size: str | None = None,
+    uncertain_domain: str | None = None,
+    include_cover_letter_topics: bool = False,
+) -> list[dict]:
+    """Same content as format_result_analysis, as Notion blocks for the page
+    body's "🔍 회사/포지션 분석" section (2026-10-03 사용자 요청: 문단 하나에
+    통째로 들어간 텍스트가 가독성이 너무 나쁘다며 이모지/줄바꿈/노션 기능을
+    써서 정리해달라는 요청).
+
+    Layout: verdict callout (판정·정보 충분도·총점, 버전·날짜는 회색) → score-verdict
+    warning callout (if any) → 총평 callout → level legend → ✅/⚠️ evidence
+    lists → 🚩 risks → 📊 배점 상세 toggle. Evidence items are paragraphs, not
+    bulleted list items, so the colored level emoji stands in for the bullet
+    (사용자 요청: 검은 점 옆에 색 점이 같이 나오지 않게).
+
+    include_cover_letter_topics is off by default because the standard page
+    body already has its own "✍️ 자소서/이력서 포인트" section with the same
+    topics as bullets.
+    """
+    date_str = datetime.now().date().isoformat()
+    scores = evaluation.scores
+    total = sum(scores.get(key, 0) for key, _ in SCORE_LABELS)
+
+    emoji, color = _VERDICT_CALLOUT[evaluation.verdict]
+    blocks = [
+        _block(
+            "callout",
+            [
+                *_run(f"판정: {evaluation.verdict}", bold=True),
+                *_run("   ·   정보 충분도: "),
+                *_run(evaluation.evidence_quality, bold=True),
+                *_run("   ·   총점: "),
+                *_run(str(total), bold=True),
+                *_run(f"\n{version} 평가 · {date_str}", color="gray"),
+            ],
+            icon={"type": "emoji", "emoji": emoji},
+            color=color,
+        )
+    ]
+
+    mandatory_cap = SCORE_CAPS[_MANDATORY_SCORE_KEY]
+    mandatory_score = scores.get(_MANDATORY_SCORE_KEY, 0)
+    if evaluation.verdict == "적극 지원" and mandatory_score < mandatory_cap * _MANDATORY_WARNING_RATIO:
+        blocks.append(
+            _block(
+                "callout",
+                _run(
+                    f"점수-판정 불일치: 필수요건 근거 부족({mandatory_score}/{mandatory_cap})에도 "
+                    "적극 지원으로 판정함"
+                ),
+                icon={"type": "emoji", "emoji": "⚠️"},
+                color="red_background",
+            )
+        )
+
+    if evaluation.summary:
+        blocks.append(
+            _block(
+                "callout",
+                [*_run("총평", bold=True), *_run("  " + evaluation.summary)],
+                icon={"type": "emoji", "emoji": "💬"},
+                color="blue_background",
+            )
+        )
+
+    def evidence_paragraph(e) -> dict:
+        return _block(
+            "paragraph",
+            [
+                *_run(_LEVEL_EMOJI[e.match_level] + " "),
+                *_run(e.jd_requirement, bold=True),
+                *_run("\n→ " + e.profile_basis),
+            ],
+        )
+
+    def plain_paragraph(text: str) -> dict:
+        return _block("paragraph", _run("▪️ " + text))
+
+    def empty_note() -> dict:
+        return _block("paragraph", _run("(없음)", color="gray"))
+
+    fit = [e for e in evaluation.evidence if e.match_level in ("강함", "일부")]
+    weak = [e for e in evaluation.evidence if e.match_level in ("미확인", "없음")]
+
+    if evaluation.evidence:
+        blocks.append(_block("paragraph", _run(_LEVEL_LEGEND, color="gray")))
+    blocks.append(_block("heading_3", _run("✅ 적합한 부분")))
+    blocks += [evidence_paragraph(e) for e in fit] or [empty_note()]
+    blocks.append(_block("heading_3", _run("⚠️ 부족하거나 안 맞는 부분")))
+    weak_blocks = [evidence_paragraph(e) for e in weak] + [plain_paragraph(g) for g in evaluation.gaps]
+    blocks += weak_blocks or [empty_note()]
+
+    if evaluation.risks:
+        blocks.append(_block("heading_3", _run("🚩 위험 요인")))
+        blocks += [_block("bulleted_list_item", _run(r)) for r in evaluation.risks]
+
+    if include_cover_letter_topics and evaluation.cover_letter_topics:
+        blocks.append(_block("heading_3", _run("✍️ 자소서 소재")))
+        blocks += [_block("bulleted_list_item", _run(t)) for t in evaluation.cover_letter_topics]
+
+    score_parts = " · ".join(f"{label}{scores.get(key, 0)}" for key, label in SCORE_LABELS)
+    toggle = _block("toggle", [*_run("📊 배점 상세", bold=True), *_run("   " + score_parts, color="gray")])
+    breakdown = [
+        _block("bulleted_list_item", [*_run(label, bold=True), *_run(": " + evaluation.score_breakdown[key])])
+        for key, label in SCORE_LABELS
+        if key in evaluation.score_breakdown
+    ]
+    if breakdown:
+        toggle["toggle"]["children"] = breakdown
+    blocks.append(toggle)
+
+    if uncertain_company_size:
+        blocks.append(_block("paragraph", _run(f"추정 기업규모: {uncertain_company_size} (고정 옵션에 없어 컬럼 미기입)", color="gray")))
+    if uncertain_domain:
+        blocks.append(_block("paragraph", _run(f"추정 도메인: {uncertain_domain} (고정 옵션에 없어 컬럼 미기입)", color="gray")))
+    return blocks
+
+
 def _title(content: str) -> dict:
     return {"title": [{"text": {"content": content}}]}
 

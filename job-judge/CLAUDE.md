@@ -111,9 +111,9 @@
    표에도 본문에도 없이 완전히 사라진다 — `client.blocks.children.append(block_id=새페이지id,
    children=[...])`로 직접 쌓는다(새 페이지라 기존 내용이 없으므로 삭제·재생성 필요 없음). 표준
    블록 순서: `heading_1("회사 - 직무")` → 기본정보(공고링크/마감일/지원상태, 문단 1개) →
-   `heading_2("JD 원문")` + 자격요건/담당업무/우대사항 불릿 → `heading_2("회사/포지션 분석")` +
-   `notion_writer.format_result_analysis(evaluation, version=..., uncertain_company_size=...,
-   uncertain_domain=...)`의 결과를 문단으로(2000자 넘으면 줄 단위로 잘라 여러 문단 블록으로 나눔) →
+   `heading_2("JD 원문")` + 자격요건/담당업무/우대사항 불릿 → `heading_2("🔍 회사/포지션 분석")` +
+   `notion_writer.format_result_analysis_blocks(evaluation, version=..., uncertain_company_size=...,
+   uncertain_domain=...)`가 돌려주는 블록 리스트를 그대로 →
    `heading_2("✍️ 자소서/이력서 포인트")` + `cover_letter_topics` 불릿. 이미 다운로드해둔 원본 공고
    이미지가 있으면 `heading_1` 바로 다음에 image 블록(파일 업로드 API, 5MB 초과 시 PIL로 압축)을
    끼워 넣는다.
@@ -142,6 +142,17 @@
 건드릴 때 점수를 다시 맨 위로 올리지 않는다 — evidence의 jd_requirement/profile_basis/match_level
 필드가 그대로 "왜 맞는지/왜 안 맞는지" 문장이 되므로, Evaluation JSON 작성 시 이 필드들을 구체적으로
 채우는 게 배점 자체보다 중요하다.
+
+**본문에는 텍스트가 아니라 `format_result_analysis_blocks()`의 블록을 쓴다** (2026-10-03 사용자 요청:
+위 텍스트를 문단 하나에 통째로 넣었더니 가독성이 너무 나쁘다며 이모지·줄바꿈·노션 기능으로 정리해달라고
+함). 내용은 위 텍스트와 같고 배치만 다르다: 판정 콜아웃(판정·정보 충분도·총점, 판정별 이모지/색) →
+점수-판정 불일치 경고 콜아웃(있을 때) → 💬 총평 콜아웃(맨 아래가 아니라 판정 바로 밑으로 올림) → 범례
+→ ✅ 적합한 부분 / ⚠️ 부족하거나 안 맞는 부분(heading_3) → 🚩 위험 요인 → 📊 배점 상세 토글(계산식은
+접어둠). evidence 항목은 **글머리표가 아니라 문단 블록**으로 만들고 맨 앞의 🟢/🟡/⚪/🔴(강함/일부/미확인/
+없음) 이모지가 글머리표 역할을 한다 — 글머리표로 만들면 검은 점과 색 점이 나란히 보여서 사용자가 빼달라고
+요청함. JD 요건은 굵게, 근거는 줄을 바꿔 "→ …"로 쓴다. 자소서 소재는 본문의 "✍️ 자소서/이력서 포인트"
+섹션과 겹치므로 기본으로 넣지 않는다. 텍스트 버전(`format_result_analysis()`)은 테스트와 다른 용도를 위해
+남겨둔다.
 
 ## profile.md 관리 정책 (토큰 절약 핵심)
 
