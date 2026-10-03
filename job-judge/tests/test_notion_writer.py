@@ -515,6 +515,34 @@ class TestSaveExistingRow:
         properties = kwargs["properties"]
         assert UPDATE_PROTECTED_KEYS.isdisjoint(properties.keys())
 
+    def test_update_keeps_extra_link_icons_the_user_added_by_hand(self):
+        """사용자가 공고링크 칸에 🔗를 더 붙여 둔 행은 다시 저장해도 칸을 덮어쓰지
+        않는다 (2026-10-04) -- 덮어쓰면 아이콘 하나로 줄어 추가 링크가 사라진다."""
+        job = _valid_job()
+        page = _existing_page("existing-page-id", job.source_url)
+        extra = "https://example.com/extra"
+        page["properties"]["공고링크"]["rich_text"].append(
+            {"href": extra, "text": {"content": "\U0001F517", "link": {"url": extra}}}
+        )
+        mock_client = _mock_client_with_data_source([page])
+
+        save(job, _valid_evaluation(), client=mock_client, db_id="fake-db-id")
+
+        _, kwargs = mock_client.pages.update.call_args
+        assert "공고링크" not in kwargs["properties"]
+        assert "결과분석" in kwargs["properties"]
+
+    def test_update_still_rewrites_posting_link_when_only_one_icon_exists(self):
+        job = _valid_job()
+        mock_client = _mock_client_with_data_source(
+            [_existing_page("existing-page-id", job.source_url)]
+        )
+
+        save(job, _valid_evaluation(), client=mock_client, db_id="fake-db-id")
+
+        _, kwargs = mock_client.pages.update.call_args
+        assert kwargs["properties"]["공고링크"]["rich_text"][0]["text"]["link"]["url"] == job.source_url
+
     def test_dedup_filter_matches_url_and_position_not_url_alone(self):
         """A group-recruiting notice (e.g. a Korean 대기업 공동채용 posting)
         commonly lists many distinct roles under one shared 공고링크. Matching

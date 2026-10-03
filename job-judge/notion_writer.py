@@ -655,6 +655,40 @@ def _link_url_of(link_icon_prop: dict) -> str | None:
     return run.get("href") or run.get("text", {}).get("link", {}).get("url")
 
 
+def _link_urls_of(link_icon_prop: dict) -> list[str]:
+    """Every hyperlink href in a 공고링크-shaped rich_text property value, in
+    order (the first one is the posting URL dedup matches on; any further
+    ones are links the user added by hand)."""
+    runs = link_icon_prop.get("rich_text", []) if link_icon_prop else []
+    urls = []
+    for run in runs:
+        url = run.get("href") or (run.get("text", {}).get("link") or {}).get("url")
+        if url:
+            urls.append(url)
+    return urls
+
+
+def _has_extra_links(link_icon_prop: dict) -> bool:
+    """True when the 공고링크 cell holds more than the single posting link --
+    i.e. the user added extra link icons by hand (2026-10-04 사용자 요청).
+    save() must not rewrite the cell then, or an update would collapse it
+    back to one icon and silently drop the extra links."""
+    return len(_link_urls_of(link_icon_prop)) > 1
+
+
+def _find_existing_page(client, data_source_id: str, source_url: str, position: str) -> dict | None:
+    """Find an existing row (the full query-result page dict) matching both
+    source_url and position."""
+    query_result = client.data_sources.query(
+        data_source_id=data_source_id,
+        filter={"property": "직무명", "rich_text": {"equals": position}},
+    )
+    for page in query_result.get("results", []):
+        if _link_url_of(page["properties"].get("공고링크", {})) == source_url:
+            return page
+    return None
+
+
 def _find_existing_page_id(client, data_source_id: str, source_url: str, position: str) -> str | None:
     """Find an existing row matching both source_url and position.
 
@@ -670,14 +704,8 @@ def _find_existing_page_id(client, data_source_id: str, source_url: str, positio
     that same page as "the same posting" and silently overwrite one role's
     data with another's).
     """
-    query_result = client.data_sources.query(
-        data_source_id=data_source_id,
-        filter={"property": "직무명", "rich_text": {"equals": position}},
-    )
-    for page in query_result.get("results", []):
-        if _link_url_of(page["properties"].get("공고링크", {})) == source_url:
-            return page["id"]
-    return None
+    page = _find_existing_page(client, data_source_id, source_url, position)
+    return page["id"] if page else None
 
 
 def save(
@@ -738,12 +766,16 @@ def save(
 
     properties = _build_properties(job, result_analysis_text, version, total_score)
 
-    existing_page_id = None
+    existing_page = None
     if job.source_url:
-        existing_page_id = _find_existing_page_id(client, data_source_id, job.source_url, job.position)
+        existing_page = _find_existing_page(client, data_source_id, job.source_url, job.position)
 
-    if existing_page_id:
-        client.pages.update(page_id=existing_page_id, properties=properties)
+    if existing_page:
+        # 사용자가 공고링크 칸에 링크 아이콘을 직접 더 붙여 둔 행이면 칸을 건드리지
+        # 않는다 -- 다시 쓰면 아이콘 하나로 덮어써져 추가한 링크가 사라진다.
+        if _has_extra_links(existing_page["properties"].get("공고링크", {})):
+            properties.pop("공고링크", None)
+        client.pages.update(page_id=existing_page["id"], properties=properties)
     else:
         # 지원상태 default is layered on ONLY here, for a brand-new row, so it
         # sorts correctly from the start -- an update to an existing row above
