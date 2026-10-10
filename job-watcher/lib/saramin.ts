@@ -10,11 +10,16 @@
 import { parse } from "node-html-parser";
 import type { Posting } from "./types.js";
 
-// 사용자가 실제 고른 필터 그대로 사용 (신입, 대기업/중견기업 등, 수도권,
-// 백엔드/서버개발+데이터엔지니어+웹개발). 필터를 바꾸려면 이 상수만 교체.
+// 사용자가 실제 고른 필터 그대로 사용 (신입, 대기업/중견기업 등, 수도권).
+// 직무(cat_kewd): 백엔드/서버개발(84)+데이터엔지니어(83)+웹개발(87)에 2026-10-10
+// SE(시스템엔지니어)(100)/인프라(127)/네트워크(104)/SI개발(101)/Java(235)/클라우드(136)/
+// DBA(95)/빅데이터(116)/풀스택(2232)을 더했다(56건 -> 86건). ERP(149)/SAP(168)/기술지원(81)/
+// 유지보수(89)도 후보였지만 추가분이 경리·설비 유지보수 같은 비개발 공고 위주라 뺐다.
+// 필터를 바꾸려면 이 상수만 교체.
 export const SEARCH_URL =
   "https://www.saramin.co.kr/zf_user/jobs/public/list?loc_mcd=101000%2C102000" +
-  "&cat_kewd=84%2C83%2C87&exp_cd=1&company_type=scale001%2Cscale003%2Cscale002" +
+  "&cat_kewd=84%2C83%2C87%2C100%2C127%2C104%2C101%2C235%2C136%2C95%2C116%2C2232" +
+  "&exp_cd=1&company_type=scale001%2Cscale003%2Cscale002" +
   "&company_cd=0%2C1%2C2%2C3%2C4%2C5%2C6%2C7%2C9%2C10&job_type=1%2C2%2C4" +
   "&panel_type=domestic&search_optional_item=y&search_done=y&panel_count=y&preview=y";
 

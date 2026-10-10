@@ -8,12 +8,15 @@
 // fetch + JSON parse, this module makes no LLM call.
 import type { Posting } from "./types.js";
 
-// 사용자가 실제 보고 있는 필터를 그대로 사용 (대기업/중견기업/공기업, IT 관련 duty group,
-// 마감 제외). 공기업은 자소설닷컴 businessTypes 값이 public_institution이다(2026-10-03 실제
-// 호출로 확인 -- 공공기관 공고가 이 값으로 잡힘). 필터를 바꾸고 싶으면 이 상수만 교체하면 된다.
+// 사용자가 실제 보고 있는 필터를 그대로 사용 (대기업/중견기업/공기업/기타, IT 관련 duty
+// group, 마감 제외). 공기업은 자소설닷컴 businessTypes 값이 public_institution이다(2026-10-03
+// 실제 호출로 확인 -- 공공기관 공고가 이 값으로 잡힘). 2026-10-10에 other_business_type(화면의
+// "기타")을 더했다: 자소설닷컴이 대기업/중견으로 분류하지 않은 상장 SW 기업 등이 여기 들어가
+// 45건 -> 61건이 된다(추가 16건 중 약 9건이 IT 개발 공고). 필터를 바꾸고 싶으면 이 상수만
+// 교체하면 된다.
 export const SEARCH_URL =
   "https://jasoseol.com/search?division=1%2C3%2C4" +
-  "&businessTypes=big_business%2Cmiddle_market%2Cpublic_institution" +
+  "&businessTypes=big_business%2Cmiddle_market%2Cpublic_institution%2Cother_business_type" +
   "&dutyGroupIds=160%2C164%2C165%2C166%2C170%2C171%2C176%2C177%2C178%2C179%2C180%2C181%2C182" +
   "&excludeClosed=true";
 
