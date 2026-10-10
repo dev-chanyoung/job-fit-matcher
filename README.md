@@ -9,10 +9,10 @@
 
 ## 🛠 Tech Stack
 - **job-watcher** (신규 공고 발견): TypeScript, Vercel Serverless Functions, Vercel Cron
-- **job-judge** (하드필터 + 정성평가): Python 3, Pydantic, Typer (평가는 Claude Code 세션이 수행하고, Anthropic SDK 호출 경로는 API 키를 쓸 때를 위한 대체 경로)
+- **job-judge** (하드필터 + 정성평가): Python 3, Pydantic, Typer (평가는 Claude Code 세션이 수행하고, Anthropic SDK 호출 경로는 API 키를 쓸 때를 위한 대체 경로), 헤드리스 Edge/Chrome (JS로 그려지거나 이미지로 된 공고 본문 열람)
 - **Storage:** MongoDB Atlas (공고 상태 추적), Notion API (결과 트래커)
 - **Notification:** Discord Webhook / Embeds
-- **Test:** pytest (149 tests), vitest (36 tests) — 전부 mock 기반
+- **Test:** pytest (170 tests), vitest (36 tests) — 전부 mock 기반
 
 <br>
 
@@ -40,7 +40,7 @@ flowchart LR
     end
 ```
 
-1. **발견 (job-watcher):** Vercel Cron이 매일 자소설닷컴·사람인을 파싱해 신규 공고만 MongoDB로 중복 제거 후 Discord로 알림 (LLM 호출 없이 전부 결정론적 코드)
+1. **발견 (job-watcher):** Vercel Cron이 매일 자소설닷컴(공기업·기타 업종 포함)·사람인(직무 카테고리 12종)을 파싱해 신규 공고만 MongoDB로 중복 제거 후 Discord로 알림 (LLM 호출 없이 전부 결정론적 코드)
 2. **1차 분류 (job-judge, 세션 시작 훅):** 쌓인 신규 공고를 Claude Code 세션이 `hard_filter`를 호출해 먼저 거르고, 나머지만 `profile.md`와 가볍게 대조해 적합/애매/부적합 3단계로 재정리
 3. **정식 평가 (job-judge, 지원 검토 시):** 하드필터를 통과한 공고만 5개 항목(필수요건/기술스택/업무내용/우대사항/도메인) 가중 배점으로 정성평가하고, 근거(evidence)를 Notion 페이지 본문에 기록
 
@@ -60,6 +60,15 @@ flowchart LR
 - **소스 간 중복 제거 (자소설닷컴 ↔ 사람인 ↔ Notion)**
   - 같은 회사가 여러 채용 사이트에 각각 공고를 올리거나, 이미 Notion에 등록된 회사가 다른 URL로 다시 감지되는 문제를 회사명 정규화(법인 형태 접두/접미어 제거) 비교로 해결
   - 단, 같은 회사라도 제목에 구체적 직무/부문명이 있으면 서로 다른 공고로 판단해 중복 제거 대상에서 제외 — 그룹 통합 공고와 계열사별 개별 공고를 구분
+
+- **본문이 안 읽히는 공고는 헤드리스 브라우저로 직접 열기**
+  - 일부 채용 사이트는 본문을 자바스크립트로 나중에 내려주거나 통째로 이미지로 올려서, 일반 페이지 조회로는 제목·마감일 같은 뼈대만 나옴
+  - `fetch_rendered.py`가 PC의 Edge/Chrome을 헤드리스로 띄워 렌더링된 텍스트와 이미지 URL을 얻고, 본문 이미지를 내려받아 읽을 수 있는 크기로 잘라 세션에 넘김. 이미지 속 글자는 코드가 읽지 않고 세션이 판독
+  - 정식 평가에서는 이 방법과 회사 채용 페이지(`apply_url`)를 열어 보기 전에 "정보 부족"으로 처리하지 않도록 지침으로 고정
+
+- **Notion 결과를 표 요약 + 페이지 본문으로 분리**
+  - 결과분석 칸에 긴 텍스트를 넣었더니 표의 행이 깨져서, 표에는 판정 한 줄만 두고 상세 근거는 페이지 본문에 판정·총평 콜아웃, 이모지로 구분한 근거 문단, 접힌 배점 토글 블록으로 기록
+  - 공고링크 칸은 링크 아이콘만 보이게 하고 원본 공고와 회사 채용 페이지 링크를 함께 걸되, 사용자가 직접 추가한 링크는 업데이트 때 덮어쓰지 않음
 
 - **캐시 친화적 단일 진실 소스(`profile.md`) 설계**
   - 매 평가마다 프롬프트에 통째로 들어가는 프로필 파일을 "정보 밀도 높은 불릿 + 키워드 태그" 형태로 유지해 토큰 비용을 관리
@@ -102,6 +111,6 @@ flowchart LR
 
 ## ✅ 테스트
 ```bash
-cd job-judge && python -m pytest -v   # 149개, 전부 mock 기반이라 실제 API 키 불필요
+cd job-judge && python -m pytest -v   # 170개, 전부 mock 기반이라 실제 API 키 불필요
 cd job-watcher && npm test            # vitest, 네트워크/DB/Discord 전부 mock
 ```
