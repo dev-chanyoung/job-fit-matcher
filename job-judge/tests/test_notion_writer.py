@@ -532,6 +532,35 @@ class TestSaveExistingRow:
         assert "공고링크" not in kwargs["properties"]
         assert "결과분석" in kwargs["properties"]
 
+    def test_apply_url_is_written_as_second_link_after_the_posting_link(self):
+        """공고링크 칸: 첫 링크는 자소설닷컴/사람인(중복 확인 기준), 둘째는 실제 채용 사이트."""
+        mock_client = _mock_client_with_data_source([])
+        job = _valid_job()
+        job.apply_url = "https://careers.example.com/apply/1"
+
+        save(job, _valid_evaluation(), client=mock_client, db_id="fake-db-id")
+
+        _, kwargs = mock_client.pages.create.call_args
+        runs = kwargs["properties"]["공고링크"]["rich_text"]
+        links = [r["text"]["link"]["url"] for r in runs if r["text"].get("link")]
+        assert links == [job.source_url, job.apply_url]
+
+    def test_update_rewrites_cell_when_extra_link_is_our_own_apply_url(self):
+        """칸에 이미 [게시글, 채용사이트]가 들어 있어도 채용사이트 링크는 우리가 쓴 것이라
+        사용자가 직접 붙인 링크로 취급하지 않는다 -- 그대로 다시 쓴다."""
+        job = _valid_job()
+        job.apply_url = "https://careers.example.com/apply/1"
+        page = _existing_page("existing-page-id", job.source_url)
+        page["properties"]["공고링크"]["rich_text"].append(
+            {"href": job.apply_url, "text": {"content": "\U0001F517", "link": {"url": job.apply_url}}}
+        )
+        mock_client = _mock_client_with_data_source([page])
+
+        save(job, _valid_evaluation(), client=mock_client, db_id="fake-db-id")
+
+        _, kwargs = mock_client.pages.update.call_args
+        assert "공고링크" in kwargs["properties"]
+
     def test_update_still_rewrites_posting_link_when_only_one_icon_exists(self):
         job = _valid_job()
         mock_client = _mock_client_with_data_source(

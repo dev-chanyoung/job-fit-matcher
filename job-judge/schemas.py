@@ -20,6 +20,9 @@ class JobPosting(BaseModel):
     company: str
     position: str
     source_url: Optional[str] = None
+    # 실제 채용 사이트(회사 채용 페이지) 링크. source_url이 자소설닷컴/사람인 링크일 때 공고링크 칸에
+    # 두 번째 링크 아이콘으로 같이 걸린다 (첫 링크는 항상 source_url -- 중복 확인 기준).
+    apply_url: Optional[str] = None
     fetched_at: str  # ISO timestamp
     employment_type: Optional[str] = None  # 신입/경력/인턴 등
     required_years: Optional[str] = None

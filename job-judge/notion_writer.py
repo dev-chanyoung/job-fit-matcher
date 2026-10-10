@@ -556,16 +556,29 @@ def _rich_text(content: str) -> dict:
 LINK_ICON = "\U0001F517"  # link icon; only text visible in the 공고링크 column
 
 
+def _link_icons(urls: list[str | None]) -> dict:
+    """A rich_text property made of one link-icon glyph per URL (empty/None
+    entries and repeats are skipped), each hyperlinked to its URL, separated
+    by a plain space. Used for 공고링크 instead of Notion's plain "url"
+    property type so the table view shows short icons instead of the full
+    (often very long) posting URLs -- 2026-09-20 사용자 요청. Full URLs are
+    preserved as the runs' href/link, just not shown as text. The first URL
+    is always the one dedup matches on (see _link_url_of)."""
+    runs: list[dict] = []
+    seen: set[str] = set()
+    for url in urls:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        if runs:
+            runs.append({"text": {"content": " "}})
+        runs.append({"text": {"content": LINK_ICON, "link": {"url": url}}})
+    return {"rich_text": runs}
+
+
 def _link_icon(url: str | None) -> dict:
-    """A rich_text property whose only visible content is a link-icon glyph,
-    hyperlinked to url (empty rich_text list when there's no URL). Used for
-    공고링크 instead of Notion's plain "url" property type so the table view
-    shows a short icon instead of the full (often very long) posting URL --
-    2026-09-20 사용자 요청. The full URL is preserved as the run's href/link,
-    just not shown as text."""
-    if not url:
-        return {"rich_text": []}
-    return {"rich_text": [{"text": {"content": LINK_ICON, "link": {"url": url}}}]}
+    """Single-link form of _link_icons (empty rich_text when there's no URL)."""
+    return _link_icons([url])
 
 
 def _date(content: str | None) -> dict:
@@ -610,7 +623,8 @@ def _build_properties(
         "결과분석": _rich_text(result_analysis_text),
     }
     if job.source_url:
-        properties["공고링크"] = _link_icon(job.source_url)
+        # 자소설닷컴/사람인 링크(첫 번째, 중복 확인 기준) + 실제 채용 사이트 링크(두 번째, 2026-10-10 요청).
+        properties["공고링크"] = _link_icons([job.source_url, job.apply_url])
     if version is not None:
         properties["평가기준버전"] = _rich_text(version)
     # 항상 명시적으로 보낸다 (total_score=None이면 {"number": None}) -- 평가 없이
@@ -668,12 +682,13 @@ def _link_urls_of(link_icon_prop: dict) -> list[str]:
     return urls
 
 
-def _has_extra_links(link_icon_prop: dict) -> bool:
-    """True when the 공고링크 cell holds more than the single posting link --
-    i.e. the user added extra link icons by hand (2026-10-04 사용자 요청).
-    save() must not rewrite the cell then, or an update would collapse it
-    back to one icon and silently drop the extra links."""
-    return len(_link_urls_of(link_icon_prop)) > 1
+def _has_extra_links(link_icon_prop: dict, known_urls: tuple[str | None, ...] = ()) -> bool:
+    """True when the 공고링크 cell holds links beyond the posting link (first)
+    and the ones save() itself writes (known_urls, i.e. apply_url) -- i.e. the
+    user added extra link icons by hand (2026-10-04 사용자 요청). save() must
+    not rewrite the cell then, or an update would collapse it back and
+    silently drop the extra links."""
+    return any(url not in known_urls for url in _link_urls_of(link_icon_prop)[1:])
 
 
 def _find_existing_page(client, data_source_id: str, source_url: str, position: str) -> dict | None:
@@ -773,7 +788,7 @@ def save(
     if existing_page:
         # 사용자가 공고링크 칸에 링크 아이콘을 직접 더 붙여 둔 행이면 칸을 건드리지
         # 않는다 -- 다시 쓰면 아이콘 하나로 덮어써져 추가한 링크가 사라진다.
-        if _has_extra_links(existing_page["properties"].get("공고링크", {})):
+        if _has_extra_links(existing_page["properties"].get("공고링크", {}), (job.apply_url,)):
             properties.pop("공고링크", None)
         client.pages.update(page_id=existing_page["id"], properties=properties)
     else:
